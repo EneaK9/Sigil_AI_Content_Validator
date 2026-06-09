@@ -115,6 +115,84 @@ class TestRedditAdapter:
         
         assert "timed out" in str(exc_info.value).lower()
 
+    def test_extract_image_urls_single_image(self, adapter):
+        """Should extract URL from single image post."""
+        post_data = {
+            "title": "Test",
+            "selftext": "",
+            "author": "test",
+            "post_hint": "image",
+            "url": "https://i.redd.it/abc123.jpg"
+        }
+        
+        image_urls = adapter._extract_image_urls(post_data)
+        
+        assert len(image_urls) == 1
+        assert image_urls[0] == "https://i.redd.it/abc123.jpg"
+
+    def test_extract_image_urls_gallery(self, adapter):
+        """Should extract URLs from gallery post."""
+        post_data = {
+            "title": "Gallery Test",
+            "selftext": "",
+            "author": "test",
+            "is_gallery": True,
+            "media_metadata": {
+                "img1": {"s": {"u": "https://preview.redd.it/img1.jpg?width=1080&amp;format=pjpg"}},
+                "img2": {"s": {"u": "https://preview.redd.it/img2.jpg?width=1080&amp;format=pjpg"}},
+            },
+            "gallery_data": {
+                "items": [
+                    {"media_id": "img1"},
+                    {"media_id": "img2"},
+                ]
+            }
+        }
+        
+        image_urls = adapter._extract_image_urls(post_data)
+        
+        assert len(image_urls) == 2
+        # Should unescape &amp; to &
+        assert "&" in image_urls[0]
+        assert "&amp;" not in image_urls[0]
+
+    def test_extract_image_urls_preview_fallback(self, adapter):
+        """Should fallback to preview image."""
+        post_data = {
+            "title": "Link Post",
+            "selftext": "",
+            "author": "test",
+            "url": "https://example.com/article",
+            "preview": {
+                "images": [
+                    {"source": {"url": "https://preview.redd.it/preview.jpg?auto=webp&amp;s=abc"}}
+                ]
+            }
+        }
+        
+        image_urls = adapter._extract_image_urls(post_data)
+        
+        assert len(image_urls) == 1
+        assert "preview.redd.it" in image_urls[0]
+
+    def test_extract_image_urls_no_images(self, adapter):
+        """Should return empty list for text-only post."""
+        post_data = {
+            "title": "Text Post",
+            "selftext": "Just text, no images",
+            "author": "test",
+        }
+        
+        image_urls = adapter._extract_image_urls(post_data)
+        
+        assert len(image_urls) == 0
+
+    def test_unescape_url(self, adapter):
+        """Should unescape HTML entities in URLs."""
+        url = "https://example.com/image.jpg?a=1&amp;b=2&amp;c=3"
+        unescaped = adapter._unescape_url(url)
+        assert unescaped == "https://example.com/image.jpg?a=1&b=2&c=3"
+
 
 class TestXAdapter:
     """Tests for X/Twitter adapter."""
@@ -150,6 +228,66 @@ class TestXAdapter:
         
         assert "X_BEARER_TOKEN" in str(exc_info.value)
         assert "environment variable" in str(exc_info.value).lower()
+
+    def test_extract_image_urls_with_photos(self, adapter):
+        """Should extract URLs from media includes."""
+        data = {
+            "data": {"text": "Tweet with photos"},
+            "includes": {
+                "media": [
+                    {"type": "photo", "url": "https://pbs.twimg.com/media/photo1.jpg"},
+                    {"type": "photo", "url": "https://pbs.twimg.com/media/photo2.jpg"},
+                ]
+            }
+        }
+        
+        image_urls = adapter._extract_image_urls(data)
+        
+        assert len(image_urls) == 2
+        assert "photo1.jpg" in image_urls[0]
+        assert "photo2.jpg" in image_urls[1]
+
+    def test_extract_image_urls_with_gif(self, adapter):
+        """Should include animated GIFs."""
+        data = {
+            "data": {"text": "Tweet with gif"},
+            "includes": {
+                "media": [
+                    {"type": "animated_gif", "url": "https://pbs.twimg.com/tweet_video_thumb/gif.jpg"},
+                ]
+            }
+        }
+        
+        image_urls = adapter._extract_image_urls(data)
+        
+        assert len(image_urls) == 1
+
+    def test_extract_image_urls_ignores_video(self, adapter):
+        """Should not include video media."""
+        data = {
+            "data": {"text": "Tweet with video"},
+            "includes": {
+                "media": [
+                    {"type": "video", "url": "https://pbs.twimg.com/video.mp4"},
+                    {"type": "photo", "url": "https://pbs.twimg.com/photo.jpg"},
+                ]
+            }
+        }
+        
+        image_urls = adapter._extract_image_urls(data)
+        
+        assert len(image_urls) == 1
+        assert "photo.jpg" in image_urls[0]
+
+    def test_extract_image_urls_no_media(self, adapter):
+        """Should return empty list when no media."""
+        data = {
+            "data": {"text": "Text only tweet"},
+        }
+        
+        image_urls = adapter._extract_image_urls(data)
+        
+        assert len(image_urls) == 0
 
 
 class TestTikTokAdapter:
@@ -223,6 +361,52 @@ class TestTikTokAdapter:
         post = adapter.fetch("https://tiktok.com/@user/video/123")
         
         assert "not extractable" in post.text.lower() or "manual review" in post.text.lower()
+
+    @patch("adapters.tiktok.requests.get")
+    def test_extract_og_image(self, mock_get, adapter):
+        """Should extract og:image thumbnail."""
+        html = """
+        <html>
+        <head>
+            <meta property="og:description" content="Video caption here">
+            <meta property="og:image" content="https://p16-sign.tiktokcdn.com/obj/image.jpg">
+            <title>TikTok</title>
+        </head>
+        <body></body>
+        </html>
+        """
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = html
+        mock_get.return_value = mock_response
+        
+        post = adapter.fetch("https://tiktok.com/@user/video/123")
+        
+        assert len(post.image_urls) == 1
+        assert "tiktokcdn.com" in post.image_urls[0]
+
+    @patch("adapters.tiktok.requests.get")
+    def test_no_og_image(self, mock_get, adapter):
+        """Should return empty image_urls when no og:image."""
+        html = """
+        <html>
+        <head>
+            <meta property="og:description" content="Video caption">
+            <title>TikTok</title>
+        </head>
+        <body></body>
+        </html>
+        """
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = html
+        mock_get.return_value = mock_response
+        
+        post = adapter.fetch("https://tiktok.com/@user/video/123")
+        
+        assert len(post.image_urls) == 0
 
 
 class TestFacebookAdapter:

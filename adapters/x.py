@@ -54,8 +54,9 @@ class XAdapter(BaseAdapter):
         }
         
         params = {
-            "tweet.fields": "text,author_id,created_at",
-            "expansions": "author_id",
+            "tweet.fields": "text,author_id,created_at,attachments",
+            "expansions": "author_id,attachments.media_keys",
+            "media.fields": "url,type",
             "user.fields": "username"
         }
         
@@ -165,6 +166,9 @@ class XAdapter(BaseAdapter):
             if users:
                 author = f"@{users[0].get('username', '')}"
         
+        # Extract image URLs from media attachments
+        image_urls = self._extract_image_urls(data)
+        
         if not text:
             raise ScrapingError(
                 f"Tweet has no text content. "
@@ -177,5 +181,31 @@ class XAdapter(BaseAdapter):
             text=text,
             author=author,
             title="",
+            image_urls=image_urls,
             scraped_at=datetime.now(timezone.utc).isoformat()
         )
+    
+    def _extract_image_urls(self, data: dict) -> list[str]:
+        """
+        Extract image URLs from X API response media includes.
+        
+        Args:
+            data: Full API response data
+            
+        Returns:
+            List of image URLs
+        """
+        image_urls: list[str] = []
+        
+        includes = data.get("includes", {})
+        media_list = includes.get("media", [])
+        
+        for media in media_list:
+            media_type = media.get("type", "")
+            media_url = media.get("url", "")
+            
+            # Include photos and animated GIFs
+            if media_type in ("photo", "animated_gif") and media_url:
+                image_urls.append(media_url)
+        
+        return image_urls

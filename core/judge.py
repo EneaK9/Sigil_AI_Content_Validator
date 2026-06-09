@@ -6,11 +6,13 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Union
 
 import anthropic
 
-from config import CLAUDE_MODEL, CLAUDE_MAX_TOKENS, DEBUG_DIR
-from core.models import PostData, Violation, Verdict, JudgmentError
+from config import CLAUDE_MODEL, CLAUDE_MAX_TOKENS, DEBUG_DIR, PREFERRED_MAX_IMAGES
+from core.models import PostData, Violation, Verdict, JudgmentError, ScrapingError
+from core.image_fetcher import fetch_image_as_base64
 
 
 SYSTEM_PROMPT = """You are a precise, impartial social media policy compliance analyst.
@@ -26,7 +28,11 @@ Rules you must follow:
 4. Your confidence score must reflect genuine uncertainty — if the post is
    clearly fine, return 0.95+. If it is borderline, return 0.5-0.75.
 5. Return ONLY raw JSON. No markdown fences. No explanation. No preamble.
-   The first character of your response must be '{' and the last must be '}'."""
+   The first character of your response must be '{' and the last must be '}'.
+6. If images are provided, analyze them with the same rigor as the text.
+   Violations found in images are just as serious as violations in text.
+   In the "quote" field for image violations, describe what you saw instead
+   of quoting text, e.g.: "[Image 1: hate symbol displayed prominently in center of image]"."""
 
 
 def build_user_prompt(post: PostData, policies_text: str) -> str:
@@ -75,6 +81,68 @@ this exact structure:
 }}
 
 If the post passes all policies, violations must be an empty array []."""
+
+
+def build_message_content(post: PostData, policies_text: str) -> Union[str, list[dict]]:
+    """
+    Build message content for Claude, optionally including images.
+    
+    If no images: returns plain text string (current behavior)
+    If images: returns list of content blocks with images and text
+    
+    Args:
+        post: PostData object with the post to analyze
+        policies_text: Concatenated policy markdown text
+        
+    Returns:
+        Either a string (text only) or list of content blocks (multimodal)
+    """
+    prompt_text = build_user_prompt(post, policies_text)
+    
+    # If no images, return plain text (maintains backward compatibility)
+    if not post.image_urls:
+        return prompt_text
+    
+    # Build multimodal content with images
+    content_blocks: list[dict] = []
+    skipped_images: list[str] = []
+    
+    # Fetch and add images (up to PREFERRED_MAX_IMAGES)
+    for i, image_url in enumerate(post.image_urls[:PREFERRED_MAX_IMAGES]):
+        try:
+            base64_data, media_type = fetch_image_as_base64(image_url)
+            content_blocks.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": base64_data
+                }
+            })
+        except ScrapingError as e:
+            skipped_images.append(f"Image {i+1}: {str(e)[:100]}")
+    
+    # If all images failed, fall back to text-only
+    if not content_blocks:
+        if skipped_images:
+            prompt_text += f"\n\n[Note: {len(skipped_images)} image(s) could not be loaded for analysis]"
+        return prompt_text
+    
+    # Add note about skipped images if any
+    if skipped_images:
+        prompt_text += f"\n\n[Note: {len(skipped_images)} image(s) could not be loaded: {'; '.join(skipped_images)}]"
+    
+    # Add note about additional images if we truncated
+    if len(post.image_urls) > PREFERRED_MAX_IMAGES:
+        prompt_text += f"\n\n[Note: Post contains {len(post.image_urls)} images, only first {PREFERRED_MAX_IMAGES} analyzed]"
+    
+    # Add the text prompt as the final block
+    content_blocks.append({
+        "type": "text",
+        "text": prompt_text
+    })
+    
+    return content_blocks
 
 
 def build_verdict(post: PostData, data: dict) -> Verdict:
@@ -158,12 +226,15 @@ def judge(post: PostData, policies_text: str) -> Verdict:
     
     client = anthropic.Anthropic(api_key=api_key)
     
+    # Build message content (text-only or multimodal with images)
+    message_content = build_message_content(post, policies_text)
+    
     try:
         response = client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=CLAUDE_MAX_TOKENS,
             system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": build_user_prompt(post, policies_text)}]
+            messages=[{"role": "user", "content": message_content}]
         )
     except anthropic.APIError as e:
         raise JudgmentError(

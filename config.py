@@ -47,6 +47,11 @@ PLATFORM_POLICY_FILES = {
     "reddit": ["reddit_content_policy.md", "reddit_user_agreement.md"],
 }
 
+# Image analysis
+MAX_IMAGES_PER_POST = 20       # Claude's hard ceiling
+PREFERRED_MAX_IMAGES = 4       # Practical limit for cost control
+MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB per image
+
 # Platform URL patterns for detection
 PLATFORM_PATTERNS = {
     "reddit": ["reddit.com/r/", "redd.it/"],
