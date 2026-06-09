@@ -7,8 +7,15 @@ PolicyGuard analyzes social media posts against platform-specific Community Guid
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │   URL or    │────▶│   Fetch     │────▶│    Load     │────▶│   Claude    │────▶│    JSON     │
-│    Text     │     │   Post      │     │  Policies   │     │   Judge     │     │   Verdict   │
+│    Text     │     │ Post+Images │     │  Policies   │     │   Judge     │     │   Verdict   │
 └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+                          │                                        ▲
+                          │ image_urls                             │ multimodal
+                          ▼                                        │ message
+                    ┌─────────────┐                                │
+                    │   Fetch     │────────────────────────────────┘
+                    │   Images    │   (base64 + media_type)
+                    └─────────────┘
 ```
 
 ---
@@ -24,6 +31,7 @@ PolicyGuard analyzes social media posts against platform-specific Community Guid
   - [Advanced Options](#advanced-options)
   - [CLI Reference](#cli-reference)
 - [Output Format](#output-format)
+- [Image Analysis](#image-analysis)
 - [Platform Support](#platform-support)
   - [Reddit](#reddit)
   - [X (Twitter)](#x-twitter)
@@ -47,18 +55,19 @@ PolicyGuard analyzes social media posts against platform-specific Community Guid
 
 - **Multi-Platform Support**: Reddit, X/Twitter, TikTok, Facebook, and Instagram
 - **Automated Post Fetching**: Automatically scrapes post content from URLs (where supported)
+- **Image Analysis**: Automatically extracts and analyzes images using Claude's vision capabilities
 - **Manual Text Input**: Analyze any text against any platform's policies
 - **Detailed Verdicts**: Get comprehensive JSON output with:
   - Pass/Fail verdict
   - List of violations with severity levels (HIGH/MEDIUM/LOW)
-  - Exact quotes from the post that triggered violations
+  - Exact quotes from the post that triggered violations (or image descriptions for visual violations)
   - Specific policy references
   - Confidence scores
   - Actionable recommendations
 - **Policy Caching**: Platform policies are cached locally for fast, offline-capable analysis
 - **Extensible Architecture**: Easy to add new platforms with the adapter pattern
 - **Robust Error Handling**: Clear, actionable error messages for every failure mode
-- **Comprehensive Test Suite**: 189+ tests covering unit, integration, and AI judgment quality
+- **Comprehensive Test Suite**: 200+ tests covering unit, integration, and AI judgment quality
 
 ---
 
@@ -82,7 +91,9 @@ PolicyGuard follows a modular architecture with clear separation of concerns:
 │  models.py    │       │   tiktok.py     │       └─────────────────┘
 │policy_loader  │       │  facebook.py    │
 │     .py       │       │ instagram.py    │
-└───────────────┘       └─────────────────┘
+│image_fetcher  │       └─────────────────┘
+│     .py       │
+└───────────────┘
         │                         │
         │                         │
         ▼                         ▼
@@ -386,7 +397,7 @@ Every `check` command returns a JSON object with this structure:
 | `severity` | string | `"HIGH"`, `"MEDIUM"`, or `"LOW"` |
 | `explanation` | string | Why this violates the policy |
 | `policy_reference` | string | Specific policy section reference |
-| `quote` | string | Exact text from the post that triggered this |
+| `quote` | string | Exact text from the post that triggered this, or image description (e.g., `"[Image 1: ...]"`) for visual violations |
 
 ### Severity Levels
 
@@ -490,17 +501,80 @@ Every `check` command returns a JSON object with this structure:
 
 ---
 
+## Image Analysis
+
+PolicyGuard automatically extracts and analyzes images from social media posts using Claude's native vision capabilities.
+
+### How It Works
+
+1. **Image Extraction**: When fetching a post, adapters extract image URLs:
+   - **Reddit**: Single images, galleries, preview images
+   - **X/Twitter**: Photos and animated GIFs from media attachments
+   - **TikTok**: Video thumbnail (`og:image` meta tag)
+
+2. **Image Fetching**: Images are downloaded and converted to base64:
+   - Maximum image size: 5MB per image
+   - Supported formats: JPEG, PNG, WebP, GIF
+   - Up to 4 images analyzed by default (configurable)
+
+3. **Multimodal Analysis**: Images are sent to Claude alongside post text:
+   - Images receive the same policy scrutiny as text
+   - Violations in images are reported with visual descriptions
+
+### Image Violation Format
+
+When a violation is found in an image, the `quote` field contains a description instead of text:
+
+```json
+{
+  "rule": "Hate Symbols",
+  "severity": "HIGH",
+  "explanation": "The image displays a prohibited hate symbol, which violates the platform's policy against hateful imagery.",
+  "policy_reference": "Community Guidelines - Hateful Conduct",
+  "quote": "[Image 1: hate symbol displayed prominently in center of image]"
+}
+```
+
+### Platform Image Support
+
+| Platform | Image Types Extracted |
+|----------|----------------------|
+| Reddit | Direct images, galleries (up to 20 images), preview thumbnails |
+| X/Twitter | Photo attachments, animated GIFs |
+| TikTok | Video thumbnail only |
+| Facebook | N/A (manual text input only) |
+| Instagram | N/A (manual text input only) |
+
+### Configuration
+
+Image analysis settings in `config.py`:
+
+```python
+MAX_IMAGES_PER_POST = 20       # Claude's hard ceiling
+PREFERRED_MAX_IMAGES = 4       # Default limit for cost control
+MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB per image
+```
+
+### Limitations
+
+- **No video analysis**: Only static images and GIF thumbnails are analyzed
+- **Cost consideration**: Each image adds to API costs; limit controlled by `PREFERRED_MAX_IMAGES`
+- **Facebook/Instagram**: Images cannot be automatically extracted due to authentication walls
+- **Failed image loads**: If an image fails to download, analysis continues with remaining content and a note is added
+
+---
+
 ## Platform Support
 
 ### Overview
 
-| Platform | Auto-Fetch | Manual Text | API/Method | Notes |
-|----------|------------|-------------|------------|-------|
-| Reddit | ✅ Yes | ✅ Yes | Public `.json` endpoint | No auth required |
-| X/Twitter | ✅ Yes | ✅ Yes | API v2 | Requires bearer token |
-| TikTok | ✅ Yes | ✅ Yes | HTML meta tags | Limited to caption |
-| Facebook | ❌ No | ✅ Yes | N/A | Auth wall, use --text |
-| Instagram | ❌ No | ✅ Yes | N/A | Auth wall, use --text |
+| Platform | Auto-Fetch | Manual Text | Image Analysis | API/Method | Notes |
+|----------|------------|-------------|----------------|------------|-------|
+| Reddit | ✅ Yes | ✅ Yes | ✅ Yes | Public `.json` endpoint | No auth required |
+| X/Twitter | ✅ Yes | ✅ Yes | ✅ Yes | API v2 | Requires bearer token |
+| TikTok | ✅ Yes | ✅ Yes | ✅ Thumbnail | HTML meta tags | Limited to caption + thumbnail |
+| Facebook | ❌ No | ✅ Yes | ❌ No | N/A | Auth wall, use --text |
+| Instagram | ❌ No | ✅ Yes | ❌ No | N/A | Auth wall, use --text |
 
 ### Reddit
 
@@ -719,6 +793,10 @@ Rules you must follow:
 4. Your confidence score must reflect genuine uncertainty — if the post is
    clearly fine, return 0.95+. If it is borderline, return 0.5-0.75.
 5. Return ONLY raw JSON. No markdown fences. No explanation. No preamble.
+6. If images are provided, analyze them with the same rigor as the text.
+   Violations found in images are just as serious as violations in text.
+   In the "quote" field for image violations, describe what you saw instead
+   of quoting text, e.g.: "[Image 1: hate symbol displayed prominently in center of image]"
 ```
 
 **User Prompt Template:**
@@ -865,13 +943,13 @@ First 200 chars: [response preview]
 
 ## Testing
 
-PolicyGuard includes a comprehensive test suite with 189+ tests.
+PolicyGuard includes a comprehensive test suite with 200+ tests.
 
 ### Test Categories
 
 | Category | Count | Description |
 |----------|-------|-------------|
-| Unit Tests | 114 | Individual component testing |
+| Unit Tests | 146 | Individual component testing (including image fetcher + adapter image extraction) |
 | Integration Tests | 24 | CLI and full flow testing |
 | Edge Case Tests | 32 | Boundary conditions |
 | Judge Quality Tests | 19 | Live Claude API verification |
@@ -907,7 +985,8 @@ tests/
 │   ├── test_detector.py     # URL pattern matching
 │   ├── test_models.py       # Dataclass validation
 │   ├── test_policy_loader.py # Policy loading
-│   └── test_adapters.py     # All platform adapters
+│   ├── test_adapters.py     # All platform adapters
+│   └── test_image_fetcher.py # Image downloading/encoding
 ├── integration/
 │   ├── test_cli.py          # CLI commands
 │   └── test_full_flow.py    # End-to-end with mocks
@@ -1093,7 +1172,8 @@ policyguard/
 ├── core/                       # Core business logic
 │   ├── __init__.py
 │   ├── detector.py             # URL → platform detection
-│   ├── judge.py                # Claude API integration
+│   ├── image_fetcher.py        # Download + base64 encode images
+│   ├── judge.py                # Claude API integration (multimodal)
 │   ├── models.py               # Dataclasses + exceptions
 │   └── policy_loader.py        # Load policies from cache
 │
@@ -1148,12 +1228,13 @@ policyguard/
 ```python
 @dataclass
 class PostData:
-    url: str              # Original URL or "manual-input"
-    platform: str         # "reddit" | "x" | "tiktok" | "facebook" | "instagram"
-    text: str             # Full post text/body
-    author: str = ""      # Username (empty if unavailable)
-    title: str = ""       # Post title (empty if N/A)
-    scraped_at: str = ""  # ISO 8601 timestamp (auto-generated)
+    url: str                    # Original URL or "manual-input"
+    platform: str               # "reddit" | "x" | "tiktok" | "facebook" | "instagram"
+    text: str                   # Full post text/body
+    author: str = ""            # Username (empty if unavailable)
+    title: str = ""             # Post title (empty if N/A)
+    image_urls: list[str] = []  # URLs of images in the post (auto-extracted)
+    scraped_at: str = ""        # ISO 8601 timestamp (auto-generated)
 ```
 
 #### `Violation`
@@ -1165,7 +1246,7 @@ class Violation:
     severity: str         # "HIGH" | "MEDIUM" | "LOW"
     explanation: str      # Why this is a violation
     policy_reference: str # Exact policy section
-    quote: str            # Verbatim triggering phrase
+    quote: str            # Verbatim triggering phrase or "[Image N: description]" for visual violations
 ```
 
 #### `Verdict`
@@ -1208,7 +1289,11 @@ Load cached policies for a platform. Raises `PolicyNotFoundError` if missing.
 
 #### `judge(post: PostData, policies_text: str) -> Verdict`
 
-Send post to Claude for analysis. Raises `JudgmentError` on failure.
+Send post to Claude for analysis (text + images if available). Raises `JudgmentError` on failure.
+
+#### `fetch_image_as_base64(url: str) -> tuple[str, str]`
+
+Download an image and return `(base64_data, media_type)`. Raises `ScrapingError` on failure.
 
 ---
 
