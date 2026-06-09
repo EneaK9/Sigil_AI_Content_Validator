@@ -1,0 +1,41 @@
+# Campaign definitions for the Sigil social scraper.
+#
+# A campaign = (platform, topic, country, seeds). Seeds are a flat list of
+# strings whose meaning is platform-specific:
+#   tiktok    -> "#tag" = hashtag, "@handle" = profile, anything else = search query
+#   instagram -> "#tag"/bare word = hashtag search, full URL = direct post/profile URL
+#   facebook  -> page URLs ONLY (FB keyword search is unreliable)
+#
+# daily_target tunes how many runs the runner schedules per day for the campaign
+# (it spreads them across scheduling windows rather than bursting).
+
+campaigns:
+  - platform: tiktok
+    topic: protests
+    country: Albania
+    seeds:
+      - "#protesta"
+      - "#zvernec"
+      - "sazan"
+    daily_target: 100
+    enabled: true
+
+  - platform: instagram
+    topic: protests
+    country: Albania
+    seeds:
+      - "#protesta"
+      - "#zvernec"
+      - "sazan"
+    daily_target: 100
+    enabled: true
+
+  # - platform: facebook
+  #   topic: protests
+  #   country: US
+  #   seeds:
+  #     # Facebook: page URLs only.
+  #     - "https://www.facebook.com/cityofexample"
+  #     - "https://www.facebook.com/examplecountygov"
+  #   daily_target: 100
+  #   enabled: true

@@ -1,0 +1,27 @@
+{
+  "id": "7251234567890123456",
+  "text": "Loving the new park downtown! #citylife #parks @cityofexample",
+  "createTimeISO": "2026-05-30T14:22:10.000Z",
+  "webVideoUrl": "https://www.tiktok.com/@traveler/video/7251234567890123456",
+  "authorMeta": {
+    "id": "MS4wLjABAAAAexampleSecUid",
+    "name": "traveler",
+    "nickName": "World Traveler",
+    "profileUrl": "https://www.tiktok.com/@traveler"
+  },
+  "diggCount": 15234,
+  "commentCount": 412,
+  "shareCount": 88,
+  "playCount": 250341,
+  "language": "en",
+  "videoMeta": {
+    "downloadAddr": "https://v.tiktok.example/video/7251234567890123456.mp4",
+    "coverUrl": "https://p.tiktok.example/cover/7251234567890123456.jpg",
+    "duration": 27
+  },
+  "hashtags": [
+    {"name": "citylife"},
+    {"name": "parks"}
+  ],
+  "mentions": ["cityofexample"]
+}

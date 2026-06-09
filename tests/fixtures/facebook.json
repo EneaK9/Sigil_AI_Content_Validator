@@ -1,0 +1,18 @@
+{
+  "postId": "1122334455667788",
+  "url": "https://www.facebook.com/cityofexample/posts/1122334455667788",
+  "text": "Road works on Main Street begin Monday. Plan ahead! #roadworks",
+  "time": "2026-05-25T17:45:30.000Z",
+  "type": "Video",
+  "videoUrl": "https://video.fb.example/v/1122334455667788.mp4",
+  "thumbnailUrl": "https://scontent.fb.example/thumb/1122334455667788.jpg",
+  "user": {
+    "id": "100044556677889",
+    "name": "City of Example",
+    "profileUrl": "https://www.facebook.com/cityofexample"
+  },
+  "likes": 340,
+  "comments": 75,
+  "shares": 120,
+  "viewsCount": 8800
+}
