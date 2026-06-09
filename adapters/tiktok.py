@@ -125,6 +125,9 @@ class TikTokAdapter(BaseAdapter):
         # Extract thumbnail/preview image from og:image
         image_urls = self._extract_image_urls(soup)
         
+        # TikTok post URL is the video itself
+        video_urls = [url]
+        
         return PostData(
             url=url,
             platform="tiktok",
@@ -132,6 +135,7 @@ class TikTokAdapter(BaseAdapter):
             author=author,
             title="",
             image_urls=image_urls,
+            video_urls=video_urls,
             scraped_at=datetime.now(timezone.utc).isoformat()
         )
     

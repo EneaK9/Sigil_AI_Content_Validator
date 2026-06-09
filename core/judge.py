@@ -6,13 +6,14 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 import anthropic
 
 from config import CLAUDE_MODEL, CLAUDE_MAX_TOKENS, DEBUG_DIR, PREFERRED_MAX_IMAGES
 from core.models import PostData, Violation, Verdict, JudgmentError, ScrapingError
 from core.image_fetcher import fetch_image_as_base64
+from core.video_transcriber import transcribe_video
 
 
 SYSTEM_PROMPT = """You are a precise, impartial social media policy compliance analyst.
@@ -32,21 +33,26 @@ Rules you must follow:
 6. If images are provided, analyze them with the same rigor as the text.
    Violations found in images are just as serious as violations in text.
    In the "quote" field for image violations, describe what you saw instead
-   of quoting text, e.g.: "[Image 1: hate symbol displayed prominently in center of image]"."""
+   of quoting text, e.g.: "[Image 1: hate symbol displayed prominently in center of image]".
+7. If a video transcript is provided, analyze it with the same rigor as the post text.
+   Violations found in transcripts are just as serious as violations in text.
+   In the "quote" field for transcript violations, include the relevant excerpt and label it,
+   e.g.: "[Video transcript: 'exact words spoken here']"."""
 
 
-def build_user_prompt(post: PostData, policies_text: str) -> str:
+def build_user_prompt(post: PostData, policies_text: str, transcript_text: str = "") -> str:
     """
     Build the user prompt for Claude with post content and policies.
     
     Args:
         post: PostData object with the post to analyze
         policies_text: Concatenated policy markdown text
+        transcript_text: Optional video transcript text to append
         
     Returns:
         Formatted user prompt string
     """
-    return f"""PLATFORM: {post.platform}
+    prompt = f"""PLATFORM: {post.platform}
 
 POST URL: {post.url}
 POST AUTHOR: {post.author}
@@ -81,9 +87,42 @@ this exact structure:
 }}
 
 If the post passes all policies, violations must be an empty array []."""
+    
+    return prompt + transcript_text
 
 
-def build_message_content(post: PostData, policies_text: str) -> Union[str, list[dict]]:
+def fetch_video_transcripts(post: PostData) -> str:
+    """
+    Transcribe each video URL. Returns a formatted string to append
+    to the prompt, or empty string if nothing was transcribed.
+    
+    Args:
+        post: PostData object with video_urls
+        
+    Returns:
+        Formatted transcript text or empty string
+    """
+    if not post.video_urls:
+        return ""
+    
+    transcripts: list[str] = []
+    
+    for i, video_url in enumerate(post.video_urls, 1):
+        transcript = transcribe_video(video_url)
+        if transcript:
+            transcripts.append(f"[Video {i} transcript]\n{transcript}")
+    
+    if not transcripts:
+        return ""
+    
+    return "\n\n" + "\n\n".join(transcripts)
+
+
+def build_message_content(
+    post: PostData, 
+    policies_text: str,
+    provided_transcript: Optional[str] = None
+) -> Union[str, list[dict]]:
     """
     Build message content for Claude, optionally including images.
     
@@ -93,11 +132,18 @@ def build_message_content(post: PostData, policies_text: str) -> Union[str, list
     Args:
         post: PostData object with the post to analyze
         policies_text: Concatenated policy markdown text
+        provided_transcript: Optional pre-transcribed video text (bypasses Whisper)
         
     Returns:
         Either a string (text only) or list of content blocks (multimodal)
     """
-    prompt_text = build_user_prompt(post, policies_text)
+    # Use provided transcript or fetch from video URLs
+    if provided_transcript:
+        transcript_text = f"\n\n[Video transcript]\n{provided_transcript}"
+    else:
+        transcript_text = fetch_video_transcripts(post)
+    
+    prompt_text = build_user_prompt(post, policies_text, transcript_text)
     
     # If no images, return plain text (maintains backward compatibility)
     if not post.image_urls:
@@ -203,13 +249,18 @@ def build_verdict(post: PostData, data: dict) -> Verdict:
     return verdict
 
 
-def judge(post: PostData, policies_text: str) -> Verdict:
+def judge(
+    post: PostData, 
+    policies_text: str,
+    provided_transcript: Optional[str] = None
+) -> Verdict:
     """
     Send post and policies to Claude for policy compliance analysis.
     
     Args:
         post: PostData object with the post to analyze
         policies_text: Concatenated policy markdown text
+        provided_transcript: Optional pre-transcribed video text (bypasses Whisper API)
         
     Returns:
         Verdict object with the analysis result
@@ -227,7 +278,7 @@ def judge(post: PostData, policies_text: str) -> Verdict:
     client = anthropic.Anthropic(api_key=api_key)
     
     # Build message content (text-only or multimodal with images)
-    message_content = build_message_content(post, policies_text)
+    message_content = build_message_content(post, policies_text, provided_transcript)
     
     try:
         response = client.messages.create(

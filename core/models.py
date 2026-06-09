@@ -39,6 +39,7 @@ class PostData:
     author: str = ""
     title: str = ""
     image_urls: list[str] = field(default_factory=list)
+    video_urls: list[str] = field(default_factory=list)
     scraped_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def __post_init__(self) -> None:

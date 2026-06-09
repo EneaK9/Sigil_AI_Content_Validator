@@ -52,6 +52,10 @@ MAX_IMAGES_PER_POST = 20       # Claude's hard ceiling
 PREFERRED_MAX_IMAGES = 4       # Practical limit for cost control
 MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB per image
 
+# Video transcription
+MAX_TRANSCRIPT_LENGTH_CHARS = 5000   # Truncate long transcripts to control token cost
+WHISPER_MAX_FILE_SIZE_BYTES = 24 * 1024 * 1024  # 24MB - under OpenAI's 25MB limit
+
 # Platform URL patterns for detection
 PLATFORM_PATTERNS = {
     "reddit": ["reddit.com/r/", "redd.it/"],

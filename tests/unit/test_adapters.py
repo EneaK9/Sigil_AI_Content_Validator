@@ -193,6 +193,57 @@ class TestRedditAdapter:
         unescaped = adapter._unescape_url(url)
         assert unescaped == "https://example.com/image.jpg?a=1&b=2&c=3"
 
+    def test_extract_video_urls_reddit_hosted(self, adapter):
+        """Should extract video URL from Reddit-hosted video posts."""
+        post_data = {
+            "title": "Check out this video",
+            "selftext": "",
+            "author": "test",
+            "is_video": True,
+            "media": {
+                "reddit_video": {
+                    "fallback_url": "https://v.redd.it/abc123/DASH_720.mp4?source=fallback"
+                }
+            }
+        }
+        
+        video_urls = adapter._extract_video_urls(post_data)
+        
+        assert len(video_urls) == 1
+        assert "v.redd.it" in video_urls[0]
+
+    def test_extract_video_urls_no_video(self, adapter):
+        """Should return empty list for text-only posts."""
+        post_data = {
+            "title": "Text Post",
+            "selftext": "Just text content",
+            "author": "test",
+            "is_video": False,
+        }
+        
+        video_urls = adapter._extract_video_urls(post_data)
+        
+        assert len(video_urls) == 0
+
+    def test_extract_video_urls_unescapes_amp(self, adapter):
+        """Should unescape HTML entities in video URLs."""
+        post_data = {
+            "title": "Video post",
+            "selftext": "",
+            "author": "test",
+            "is_video": True,
+            "media": {
+                "reddit_video": {
+                    "fallback_url": "https://v.redd.it/abc?a=1&amp;b=2"
+                }
+            }
+        }
+        
+        video_urls = adapter._extract_video_urls(post_data)
+        
+        assert "&amp;" not in video_urls[0]
+        assert "&" in video_urls[0]
+
 
 class TestXAdapter:
     """Tests for X/Twitter adapter."""
@@ -288,6 +339,56 @@ class TestXAdapter:
         image_urls = adapter._extract_image_urls(data)
         
         assert len(image_urls) == 0
+
+    def test_extract_video_urls_with_video(self, adapter):
+        """Should return tweet URL when video media is detected."""
+        data = {
+            "data": {"text": "Tweet with video"},
+            "includes": {
+                "media": [
+                    {"type": "video", "media_key": "123"},
+                ]
+            }
+        }
+        tweet_url = "https://x.com/user/status/123456"
+        
+        video_urls = adapter._extract_video_urls(data, tweet_url)
+        
+        assert len(video_urls) == 1
+        assert video_urls[0] == tweet_url
+
+    def test_extract_video_urls_no_video(self, adapter):
+        """Should return empty list when no video media."""
+        data = {
+            "data": {"text": "Tweet with photos only"},
+            "includes": {
+                "media": [
+                    {"type": "photo", "url": "https://pbs.twimg.com/photo.jpg"},
+                ]
+            }
+        }
+        
+        video_urls = adapter._extract_video_urls(data, "https://x.com/user/status/123")
+        
+        assert len(video_urls) == 0
+
+    def test_extract_video_urls_mixed_media(self, adapter):
+        """Should return tweet URL when video exists alongside photos."""
+        data = {
+            "data": {"text": "Tweet with video and photo"},
+            "includes": {
+                "media": [
+                    {"type": "photo", "url": "https://pbs.twimg.com/photo.jpg"},
+                    {"type": "video", "media_key": "456"},
+                ]
+            }
+        }
+        tweet_url = "https://x.com/user/status/789"
+        
+        video_urls = adapter._extract_video_urls(data, tweet_url)
+        
+        assert len(video_urls) == 1
+        assert video_urls[0] == tweet_url
 
 
 class TestTikTokAdapter:
@@ -385,6 +486,29 @@ class TestTikTokAdapter:
         
         assert len(post.image_urls) == 1
         assert "tiktokcdn.com" in post.image_urls[0]
+
+    @patch("adapters.tiktok.requests.get")
+    def test_tiktok_url_becomes_video_url(self, mock_get, adapter):
+        """Should include the TikTok URL as video_urls for transcription."""
+        html = """
+        <html>
+        <head>
+            <meta property="og:description" content="Video caption here">
+            <title>TikTok</title>
+        </head>
+        <body></body>
+        </html>
+        """
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = html
+        mock_get.return_value = mock_response
+        
+        post = adapter.fetch("https://tiktok.com/@user/video/123456789")
+        
+        assert len(post.video_urls) == 1
+        assert post.video_urls[0] == "https://tiktok.com/@user/video/123456789"
 
     @patch("adapters.tiktok.requests.get")
     def test_no_og_image(self, mock_get, adapter):

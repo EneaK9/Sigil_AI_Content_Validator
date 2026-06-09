@@ -6,16 +6,21 @@ PolicyGuard analyzes social media posts against platform-specific Community Guid
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   URL or    │────▶│   Fetch     │────▶│    Load     │────▶│   Claude    │────▶│    JSON     │
-│    Text     │     │ Post+Images │     │  Policies   │     │   Judge     │     │   Verdict   │
+│ URL, Text,  │────▶│   Fetch     │────▶│    Load     │────▶│   Claude    │────▶│    JSON     │
+│  or JSON    │     │ Post+Media  │     │  Policies   │     │   Judge     │     │  Verdict(s) │
 └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
-                          │                                        ▲
-                          │ image_urls                             │ multimodal
-                          ▼                                        │ message
-                    ┌─────────────┐                                │
-                    │   Fetch     │────────────────────────────────┘
-                    │   Images    │   (base64 + media_type)
-                    └─────────────┘
+       │                  │                                        ▲
+       │            ┌─────┴─────┐                                   │ multimodal
+       │            │           │                                   │ message
+       │            ▼           ▼                                   │
+       │      ┌───────────┐ ┌───────────┐                          │
+       │      │  Fetch    │ │ Transcribe│                          │
+       │      │  Images   │ │  Videos   │──────────────────────────┘
+       │      │ (base64)  │ │ (Whisper) │
+       │      └───────────┘ └───────────┘
+       │                          ▲
+       │                          │ (skip if transcript
+       └──────────────────────────┘  provided in JSON)
 ```
 
 ---
@@ -28,10 +33,14 @@ PolicyGuard analyzes social media posts against platform-specific Community Guid
 - [Configuration](#configuration)
 - [Usage](#usage)
   - [Basic Usage](#basic-usage)
+  - [JSON Input](#json-input)
+  - [Batch Processing](#batch-processing)
   - [Advanced Options](#advanced-options)
   - [CLI Reference](#cli-reference)
 - [Output Format](#output-format)
+- [JSON Input Contract](#json-input-contract)
 - [Image Analysis](#image-analysis)
+- [Video Transcription](#video-transcription)
 - [Platform Support](#platform-support)
   - [Reddit](#reddit)
   - [X (Twitter)](#x-twitter)
@@ -55,7 +64,11 @@ PolicyGuard analyzes social media posts against platform-specific Community Guid
 
 - **Multi-Platform Support**: Reddit, X/Twitter, TikTok, Facebook, and Instagram
 - **Automated Post Fetching**: Automatically scrapes post content from URLs (where supported)
+- **JSON Input**: Accept pre-extracted post data in JSON format (perfect for integration with data pipelines)
+- **Batch Processing**: Analyze multiple posts in a single command (array input → array of verdicts)
 - **Image Analysis**: Automatically extracts and analyzes images using Claude's vision capabilities
+- **Video Transcription**: Extracts audio from videos and transcribes speech using OpenAI Whisper for policy analysis
+- **Pre-transcribed Audio**: Accept video transcripts directly in JSON input (bypasses Whisper API)
 - **Manual Text Input**: Analyze any text against any platform's policies
 - **Detailed Verdicts**: Get comprehensive JSON output with:
   - Pass/Fail verdict
@@ -67,7 +80,7 @@ PolicyGuard analyzes social media posts against platform-specific Community Guid
 - **Policy Caching**: Platform policies are cached locally for fast, offline-capable analysis
 - **Extensible Architecture**: Easy to add new platforms with the adapter pattern
 - **Robust Error Handling**: Clear, actionable error messages for every failure mode
-- **Comprehensive Test Suite**: 200+ tests covering unit, integration, and AI judgment quality
+- **Comprehensive Test Suite**: 258 tests covering unit, integration, edge cases, and AI judgment quality
 
 ---
 
@@ -93,6 +106,8 @@ PolicyGuard follows a modular architecture with clear separation of concerns:
 │     .py       │       │ instagram.py    │
 │image_fetcher  │       └─────────────────┘
 │     .py       │
+│video_transcr- │
+│   iber.py     │
 └───────────────┘
         │                         │
         │                         │
@@ -121,6 +136,8 @@ PolicyGuard follows a modular architecture with clear separation of concerns:
 - Python 3.9 or higher
 - An Anthropic API key ([get one here](https://console.anthropic.com/))
 - (Optional) X/Twitter Bearer Token for X URL support
+- (Optional) OpenAI API key for video transcription ([get one here](https://platform.openai.com/))
+- (Optional) FFmpeg for video audio extraction
 
 ### Step-by-Step Installation
 
@@ -143,6 +160,8 @@ cp .env.example .env
 # ANTHROPIC_API_KEY=sk-ant-your-key-here
 
 # 6. Initialize the policy cache (required before first use)
+# Note: Facebook/Instagram will show failures - this is expected.
+# Their policies are manually curated and already included.
 python policyguard.py refresh
 
 # 7. Verify installation
@@ -157,6 +176,14 @@ python policyguard.py --help
 | `requests` | ≥2.31.0 | HTTP requests for scraping |
 | `beautifulsoup4` | ≥4.12.0 | HTML parsing for policy scraping |
 | `python-dotenv` | ≥1.0.0 | Environment variable management |
+| `yt-dlp` | latest | Video/audio downloading for transcription |
+| `openai` | ≥1.0.0 | Whisper API for speech-to-text |
+
+### System Dependencies
+
+| Dependency | Required For | Installation |
+|------------|--------------|--------------|
+| FFmpeg | Video transcription (yt-dlp audio extraction) | `brew install ffmpeg` (macOS) or `apt install ffmpeg` (Linux) |
 
 ---
 
@@ -172,6 +199,9 @@ ANTHROPIC_API_KEY=sk-ant-api03-...
 
 # Optional - Required only for X/Twitter URL support
 X_BEARER_TOKEN=AAAA...
+
+# Optional - Required for video transcription
+OPENAI_API_KEY=sk-...
 ```
 
 ### Configuration File (`config.py`)
@@ -238,6 +268,59 @@ python policyguard.py check --platform facebook --text "Paste the Facebook post 
 python policyguard.py check --platform instagram --text "Paste the Instagram caption here"
 ```
 
+### JSON Input
+
+For integration with data pipelines or when you have pre-extracted post data, use JSON input:
+
+#### Inline JSON
+
+```bash
+python policyguard.py check --json '{
+  "url": "https://www.facebook.com/permalink.php?story_fbid=123&id=456",
+  "message": "The post text content here",
+  "author.name": "Author Name",
+  "image.uri": "https://example.com/image.jpg",
+  "video_transcript": "Optional pre-transcribed audio content"
+}'
+```
+
+#### JSON File
+
+```bash
+python policyguard.py check --json-file posts.json
+```
+
+#### Stdin (for piping)
+
+```bash
+cat posts.json | python policyguard.py check --stdin
+curl -s "https://api.example.com/posts" | python policyguard.py check --stdin
+```
+
+### Batch Processing
+
+JSON input supports arrays for batch processing multiple posts:
+
+```bash
+python policyguard.py check --json '[
+  {"url": "https://facebook.com/post/1", "message": "First post"},
+  {"url": "https://facebook.com/post/2", "message": "Second post"},
+  {"url": "https://instagram.com/p/abc", "message": "Third post"}
+]'
+```
+
+Output is an array of verdicts:
+
+```json
+[
+  {"verdict": "PASS", "platform": "facebook", ...},
+  {"verdict": "FAIL", "platform": "facebook", ...},
+  {"verdict": "PASS", "platform": "instagram", ...}
+]
+```
+
+For single-post JSON input, output is a single verdict object (not an array).
+
 ### Advanced Options
 
 #### Save output to file
@@ -269,10 +352,16 @@ python policyguard.py check --platform reddit --text "Some text" --output result
 python policyguard.py check [URL] [OPTIONS]
 
 Arguments:
-  URL                    URL of the post to check (optional if using --text)
+  URL                    URL of the post to check (optional if using other input modes)
+
+Input Modes (use exactly one):
+  URL                    Auto-detect platform from URL and fetch post
+  -t, --text TEXT        Manual text input (requires --platform)
+  -j, --json JSON        Inline JSON string (single object or array)
+  -f, --json-file FILE   Path to JSON file with post data
+  -s, --stdin            Read JSON from stdin (for piping)
 
 Options:
-  -t, --text TEXT        Post text for manual input (requires --platform)
   -p, --platform NAME    Platform name: reddit, x, tiktok, facebook, instagram
   -o, --output FILE      Save JSON output to file
   -q, --quiet            Only print JSON, no status messages
@@ -287,6 +376,15 @@ python policyguard.py check "https://reddit.com/r/test/comments/abc/title"
 
 # Manual text input
 python policyguard.py check --platform x --text "Tweet content here"
+
+# JSON input (inline)
+python policyguard.py check --json '{"url": "https://facebook.com/post/1", "message": "text"}'
+
+# JSON input (file)
+python policyguard.py check --json-file posts.json
+
+# JSON input (stdin)
+cat posts.json | python policyguard.py check --stdin
 
 # Save to file with quiet mode
 python policyguard.py check "URL" -o result.json -q
@@ -319,12 +417,19 @@ Refreshing policy cache...
 
 ✓ Scraped reddit_content_policy → policies/reddit_content_policy.md (4,100 chars)
 ✓ Scraped reddit_user_agreement → policies/reddit_user_agreement.md (45,515 chars)
-✗ FAILED facebook_community — HTTP 403. Skipping. Existing file preserved.
+✓ Scraped x_tos → policies/x_tos.md (61,862 chars)
+✓ Scraped tiktok_tos → policies/tiktok_tos.md (50,408 chars)
+✗ FAILED facebook_community — Content too short or empty. Skipping. Existing file preserved.
+✗ FAILED facebook_tos — Content too short or empty. Skipping. Existing file preserved.
+✗ FAILED instagram_community — Content too short or empty. Skipping. Existing file preserved.
+✗ FAILED instagram_tos — Content too short or empty. Skipping. Existing file preserved.
 ...
 
-Policy refresh complete: 6/10 succeeded, 4 failed.
-Failed: facebook_community, facebook_tos, instagram_community, instagram_tos
+Policy refresh complete: 4/10 succeeded, 6 failed.
+Failed: facebook_community, facebook_tos, instagram_community, instagram_tos, ...
 ```
+
+> **Note:** Facebook and Instagram failures are **expected** - these policies cannot be auto-scraped and are manually curated in the repository. The existing files are preserved.
 
 #### `show-policy` - Display cached policy
 
@@ -501,6 +606,86 @@ Every `check` command returns a JSON object with this structure:
 
 ---
 
+## JSON Input Contract
+
+When using `--json`, `--json-file`, or `--stdin`, provide post data in this format:
+
+### Single Post
+
+```json
+{
+  "post_id": "122113665879162352",
+  "type": "post",
+  "url": "https://www.facebook.com/permalink.php?story_fbid=abc&id=123",
+  "message": "The post text content goes here...",
+  "timestamp": 1781016157,
+  "reactions_count": 3,
+  "comments_count": 1,
+  "reshare_count": 1,
+  "author.name": "Author Display Name",
+  "author.url": "https://www.facebook.com/people/Author/123/",
+  "image.uri": "https://example.com/image.jpg",
+  "video": "https://example.com/video.mp4",
+  "video_transcript": "Transcribed audio content from the video...",
+  "external_url": "https://example.com/linked-article"
+}
+```
+
+### Field Reference
+
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `url` | **Yes** | string | Post URL (used for platform detection) |
+| `message` | **Yes** | string | Post text content |
+| `post_id` | No | string | Platform-specific post identifier |
+| `type` | No | string | Post type (e.g., "post", "reel", "story") |
+| `timestamp` | No | number | Unix timestamp of post creation |
+| `reactions_count` | No | number | Number of reactions/likes |
+| `comments_count` | No | number | Number of comments |
+| `reshare_count` | No | number | Number of shares/reposts |
+| `author.name` | No | string | Author's display name |
+| `author.url` | No | string | Author's profile URL |
+| `image.uri` | No | string\|null | Direct URL to post image |
+| `video` | No | string\|null | Direct URL to post video |
+| `video_transcript` | No | string\|null | Pre-transcribed video audio (bypasses Whisper) |
+| `external_url` | No | string\|null | External link in the post |
+
+### Batch Processing
+
+For multiple posts, wrap objects in an array:
+
+```json
+[
+  {"url": "https://facebook.com/post/1", "message": "First post text"},
+  {"url": "https://facebook.com/post/2", "message": "Second post text"},
+  {"url": "https://instagram.com/p/abc", "message": "Third post text"}
+]
+```
+
+### Platform Detection
+
+The platform is automatically detected from the `url` field using the same patterns as URL input:
+
+| Platform | URL Patterns |
+|----------|-------------|
+| Facebook | `facebook.com/`, `fb.com/`, `fb.watch/` |
+| Instagram | `instagram.com/p/`, `instagram.com/reel/` |
+| Reddit | `reddit.com/r/`, `redd.it/` |
+| X/Twitter | `x.com/`, `twitter.com/` |
+| TikTok | `tiktok.com/@`, `vm.tiktok.com/` |
+
+### Video Transcript Field
+
+If `video_transcript` is provided, PolicyGuard uses it directly instead of calling the Whisper API. This is useful when:
+
+- You've already transcribed the video externally
+- You want to avoid Whisper API costs
+- The video is not publicly accessible for download
+
+When `video_transcript` is not provided but `video` URL is present, PolicyGuard will attempt to download and transcribe using yt-dlp + Whisper (if configured).
+
+---
+
 ## Image Analysis
 
 PolicyGuard automatically extracts and analyzes images from social media posts using Claude's native vision capabilities.
@@ -557,10 +742,110 @@ MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB per image
 
 ### Limitations
 
-- **No video analysis**: Only static images and GIF thumbnails are analyzed
 - **Cost consideration**: Each image adds to API costs; limit controlled by `PREFERRED_MAX_IMAGES`
 - **Facebook/Instagram**: Images cannot be automatically extracted due to authentication walls
 - **Failed image loads**: If an image fails to download, analysis continues with remaining content and a note is added
+
+---
+
+## Video Transcription
+
+PolicyGuard can automatically extract audio from video posts and transcribe spoken content using OpenAI's Whisper API. This enables policy analysis of verbal content in TikTok videos, Reddit video posts, and X/Twitter video tweets.
+
+### How It Works
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  Video URL  │────▶│   yt-dlp    │────▶│   Whisper   │────▶│  Transcript │
+│             │     │ (download)  │     │    API      │     │   (text)    │
+└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+```
+
+1. **Video Detection**: Adapters detect video content in posts:
+   - **Reddit**: Posts with `is_video` flag and Reddit-hosted video
+   - **TikTok**: Every TikTok URL is treated as a video
+   - **X/Twitter**: Tweets with video media attachments
+
+2. **Audio Extraction**: yt-dlp downloads audio-only at 64kbps MP3:
+   - Optimized for speech (small file size, intelligible quality)
+   - Maximum file size: 24MB (just under Whisper's 25MB limit)
+
+3. **Transcription**: OpenAI Whisper API converts speech to text:
+   - Automatic language detection
+   - Transcripts truncated to 5,000 characters for cost control
+
+4. **Analysis**: Transcripts are appended to the Claude prompt:
+   - Analyzed with same rigor as post text
+   - Violations quote the spoken words
+
+### Requirements
+
+- **FFmpeg**: Must be installed on your system for audio extraction
+  ```bash
+  # macOS
+  brew install ffmpeg
+  
+  # Ubuntu/Debian
+  sudo apt install ffmpeg
+  
+  # Windows
+  # Download from https://ffmpeg.org/download.html
+  ```
+
+- **OpenAI API Key**: Set in `.env` file
+  ```bash
+  OPENAI_API_KEY=sk-your-key-here
+  ```
+
+### Video Violation Format
+
+When a violation is found in video audio, the `quote` field contains the transcript excerpt:
+
+```json
+{
+  "rule": "Hate Speech",
+  "severity": "HIGH",
+  "explanation": "The speaker uses a racial slur while threatening a group.",
+  "policy_reference": "TikTok Community Guidelines - Hate Speech",
+  "quote": "[Video transcript: 'exact words spoken here']"
+}
+```
+
+### Platform Video Support
+
+| Platform | Video Source | Notes |
+|----------|--------------|-------|
+| TikTok | Post URL itself | Every TikTok is a video |
+| Reddit | Reddit-hosted videos | `v.redd.it` videos only |
+| X/Twitter | Tweet video attachments | Requires video media type |
+| Facebook | N/A | Manual text input only |
+| Instagram | N/A | Manual text input only |
+
+### Configuration
+
+Video transcription settings in `config.py`:
+
+```python
+MAX_TRANSCRIPT_LENGTH_CHARS = 5000   # Truncate long transcripts
+WHISPER_MAX_FILE_SIZE_BYTES = 24 * 1024 * 1024  # 24MB limit
+```
+
+### Silent Fallback
+
+Video transcription is **best-effort** and never causes errors:
+
+- If FFmpeg is not installed → skipped silently
+- If `OPENAI_API_KEY` is not set → skipped silently
+- If video download fails → skipped silently
+- If transcription fails → skipped silently
+
+In all cases, analysis continues with text and images only. No error messages, no partial failures.
+
+### Cost Considerations
+
+- Whisper API pricing: ~$0.006 per minute of audio
+- A typical 60-second TikTok costs ~$0.006 to transcribe
+- Long videos are more expensive; consider the trade-off
 
 ---
 
@@ -568,13 +853,15 @@ MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB per image
 
 ### Overview
 
-| Platform | Auto-Fetch | Manual Text | Image Analysis | API/Method | Notes |
-|----------|------------|-------------|----------------|------------|-------|
-| Reddit | ✅ Yes | ✅ Yes | ✅ Yes | Public `.json` endpoint | No auth required |
-| X/Twitter | ✅ Yes | ✅ Yes | ✅ Yes | API v2 | Requires bearer token |
-| TikTok | ✅ Yes | ✅ Yes | ✅ Thumbnail | HTML meta tags | Limited to caption + thumbnail |
-| Facebook | ❌ No | ✅ Yes | ❌ No | N/A | Auth wall, use --text |
-| Instagram | ❌ No | ✅ Yes | ❌ No | N/A | Auth wall, use --text |
+| Platform | Auto-Fetch | JSON Input | Manual Text | Image Analysis | Video Transcription | Notes |
+|----------|------------|------------|-------------|----------------|---------------------|-------|
+| Reddit | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes | No auth required |
+| X/Twitter | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes | Requires bearer token |
+| TikTok | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Thumbnail | ✅ Yes | Full video + audio |
+| Facebook | ❌ No | ✅ Yes | ✅ Yes | ✅ Via JSON | ✅ Via JSON | Use JSON or --text |
+| Instagram | ❌ No | ✅ Yes | ✅ Yes | ✅ Via JSON | ✅ Via JSON | Use JSON or --text |
+
+> **Note:** For Facebook/Instagram, use JSON input with `image.uri` and `video_transcript` fields to enable image analysis and video content moderation.
 
 ### Reddit
 
@@ -670,6 +957,8 @@ walls. To check a Facebook post, use the --text flag:
 python policyguard.py check --platform facebook --text "The copied post text..."
 ```
 
+**Policy files:** Facebook policies are **manually curated** and included in the repository. The `refresh` command will report failures for Facebook, but the existing policy files are preserved. These files contain the essential Facebook Community Standards from Meta's public Transparency Center.
+
 ### Instagram
 
 **Auto-fetch: NOT SUPPORTED**
@@ -688,6 +977,8 @@ walls. To check an Instagram post, use the --text flag:
 python policyguard.py check --platform instagram --text "The caption from the Instagram post..."
 ```
 
+**Policy files:** Instagram policies are **manually curated** and included in the repository. The `refresh` command will report failures for Instagram, but the existing policy files are preserved. These files contain the essential Instagram Community Guidelines from Meta's Help Center.
+
 ---
 
 ## Policy Management
@@ -701,13 +992,15 @@ python policyguard.py check --platform instagram --text "The caption from the In
 
 ### Policy Files
 
-| Platform | Files |
-|----------|-------|
-| Reddit | `reddit_content_policy.md`, `reddit_user_agreement.md` |
-| X/Twitter | `x_rules.md`, `x_tos.md` |
-| TikTok | `tiktok_community.md`, `tiktok_tos.md` |
-| Facebook | `facebook_community.md`, `facebook_tos.md` |
-| Instagram | `instagram_community.md`, `instagram_tos.md` |
+| Platform | Files | Source |
+|----------|-------|--------|
+| Reddit | `reddit_content_policy.md`, `reddit_user_agreement.md` | Auto-scraped |
+| X/Twitter | `x_rules.md`, `x_tos.md` | Auto-scraped |
+| TikTok | `tiktok_community.md`, `tiktok_tos.md` | Auto-scraped |
+| Facebook | `facebook_community.md`, `facebook_tos.md` | **Manually curated** |
+| Instagram | `instagram_community.md`, `instagram_tos.md` | **Manually curated** |
+
+> **Note:** Facebook and Instagram policies **cannot be auto-scraped** because Meta uses JavaScript-rendered pages and authentication walls. These policy files are manually curated and included in the repository. They contain the essential Community Standards and Terms of Service from Meta's public documentation.
 
 ### Policy Sources
 
@@ -734,7 +1027,9 @@ python policyguard.py refresh
 python policyguard.py refresh --platform reddit
 ```
 
-**Note:** Some platforms (Facebook, Instagram) use JavaScript-rendered pages that may not scrape completely. The scraper preserves existing files if a refresh fails.
+**Important:** Facebook and Instagram policies **will always fail to auto-scrape** due to Meta's JavaScript-rendered pages and authentication walls. This is expected behavior. The manually curated policy files included in the repository are preserved when refresh fails.
+
+For other platforms, if scraping fails (network issues, site changes), existing cached files are preserved.
 
 ### Viewing Cached Policies
 
@@ -753,26 +1048,31 @@ python policyguard.py show-policy tiktok
 ```
 1. INPUT
    ├── URL provided? → Detect platform → Fetch post via adapter
-   └── --text provided? → Use manual text with --platform
+   ├── --text provided? → Use manual text with --platform
+   └── --json/--json-file/--stdin? → Parse JSON → Extract PostData + transcript
 
 2. LOAD POLICIES
    └── Read cached policies/*.md files for the platform
 
-3. BUILD PROMPT
-   ├── System prompt: "You are a policy compliance analyst..."
-   └── User prompt: Platform + Post + Policies + JSON schema
+3. FETCH MEDIA (if applicable)
+   ├── Download images → Base64 encode
+   └── Transcribe video (or use provided transcript)
 
-4. CALL CLAUDE
-   ├── Single API call with full context
+4. BUILD PROMPT
+   ├── System prompt: "You are a policy compliance analyst..."
+   └── User prompt: Platform + Post + Images + Transcript + Policies + JSON schema
+
+5. CALL CLAUDE
+   ├── Single API call with full context (multimodal if images present)
    └── Model: claude-sonnet-4-20250514, max 2000 tokens
 
-5. PARSE RESPONSE
+6. PARSE RESPONSE
    ├── Extract raw JSON from response
    ├── Validate required fields
    └── Build Verdict object
 
-6. OUTPUT
-   ├── Print JSON to stdout
+7. OUTPUT
+   ├── Print JSON to stdout (array if batch mode)
    └── Optionally save to --output file
 ```
 
@@ -797,6 +1097,10 @@ Rules you must follow:
    Violations found in images are just as serious as violations in text.
    In the "quote" field for image violations, describe what you saw instead
    of quoting text, e.g.: "[Image 1: hate symbol displayed prominently in center of image]"
+7. If a video transcript is provided, analyze it with the same rigor as the post text.
+   Violations found in transcripts are just as serious as violations in text.
+   In the "quote" field for transcript violations, include the relevant excerpt and label it,
+   e.g.: "[Video transcript: 'exact words spoken here']"
 ```
 
 **User Prompt Template:**
@@ -943,16 +1247,16 @@ First 200 chars: [response preview]
 
 ## Testing
 
-PolicyGuard includes a comprehensive test suite with 200+ tests.
+PolicyGuard includes a comprehensive test suite with 258 tests.
 
 ### Test Categories
 
 | Category | Count | Description |
 |----------|-------|-------------|
-| Unit Tests | 146 | Individual component testing (including image fetcher + adapter image extraction) |
+| Unit Tests | 172 | Individual component testing (models, adapters, image fetcher, JSON input) |
 | Integration Tests | 24 | CLI and full flow testing |
 | Edge Case Tests | 32 | Boundary conditions |
-| Judge Quality Tests | 19 | Live Claude API verification |
+| Judge Quality Tests | 30 | Live Claude API verification (including video transcript tests) |
 
 ### Running Tests
 
@@ -980,20 +1284,23 @@ python -m pytest tests/unit/test_models.py::TestPostData::test_create_valid_post
 
 ```
 tests/
-├── conftest.py              # Shared fixtures
+├── conftest.py               # Shared fixtures
 ├── unit/
-│   ├── test_detector.py     # URL pattern matching
-│   ├── test_models.py       # Dataclass validation
+│   ├── test_detector.py      # URL pattern matching
+│   ├── test_models.py        # Dataclass validation
 │   ├── test_policy_loader.py # Policy loading
-│   ├── test_adapters.py     # All platform adapters
-│   └── test_image_fetcher.py # Image downloading/encoding
+│   ├── test_adapters.py      # All platform adapters
+│   ├── test_image_fetcher.py # Image downloading/encoding
+│   ├── test_video_transcriber.py # Video transcription
+│   └── test_json_input.py    # JSON input parsing
 ├── integration/
-│   ├── test_cli.py          # CLI commands
-│   └── test_full_flow.py    # End-to-end with mocks
+│   ├── test_cli.py           # CLI commands
+│   └── test_full_flow.py     # End-to-end with mocks
 ├── edge_cases/
-│   └── test_edge_cases.py   # Boundary conditions
+│   └── test_edge_cases.py    # Boundary conditions
 └── judge/
-    └── test_judge_quality.py # Live Claude tests
+    ├── test_judge_quality.py # Live Claude tests
+    └── test_judge_transcript.py # Transcript integration tests
 ```
 
 ### Judge Quality Tests
@@ -1173,6 +1480,8 @@ policyguard/
 │   ├── __init__.py
 │   ├── detector.py             # URL → platform detection
 │   ├── image_fetcher.py        # Download + base64 encode images
+│   ├── json_input.py           # Parse JSON input contract
+│   ├── video_transcriber.py    # yt-dlp + Whisper transcription
 │   ├── judge.py                # Claude API integration (multimodal)
 │   ├── models.py               # Dataclasses + exceptions
 │   └── policy_loader.py        # Load policies from cache
@@ -1190,14 +1499,17 @@ policyguard/
 │   ├── __init__.py
 │   └── policy_scraper.py       # HTML → Markdown conversion
 │
-├── policies/                   # Cached policy files (auto-generated)
-│   ├── reddit_content_policy.md
-│   ├── reddit_user_agreement.md
-│   ├── x_rules.md
-│   ├── x_tos.md
-│   ├── tiktok_community.md
-│   ├── tiktok_tos.md
-│   └── ...
+├── policies/                   # Cached policy files
+│   ├── reddit_content_policy.md    # Auto-scraped
+│   ├── reddit_user_agreement.md    # Auto-scraped
+│   ├── x_rules.md                  # Auto-scraped
+│   ├── x_tos.md                    # Auto-scraped
+│   ├── tiktok_community.md         # Auto-scraped
+│   ├── tiktok_tos.md               # Auto-scraped
+│   ├── facebook_community.md       # Manually curated (can't auto-scrape)
+│   ├── facebook_tos.md             # Manually curated (can't auto-scrape)
+│   ├── instagram_community.md      # Manually curated (can't auto-scrape)
+│   └── instagram_tos.md            # Manually curated (can't auto-scrape)
 │
 ├── debug/                      # Debug output
 │   └── last_response.txt       # Saved when Claude returns invalid JSON
@@ -1234,6 +1546,7 @@ class PostData:
     author: str = ""            # Username (empty if unavailable)
     title: str = ""             # Post title (empty if N/A)
     image_urls: list[str] = []  # URLs of images in the post (auto-extracted)
+    video_urls: list[str] = []  # URLs of videos in the post (auto-extracted)
     scraped_at: str = ""        # ISO 8601 timestamp (auto-generated)
 ```
 
@@ -1246,7 +1559,8 @@ class Violation:
     severity: str         # "HIGH" | "MEDIUM" | "LOW"
     explanation: str      # Why this is a violation
     policy_reference: str # Exact policy section
-    quote: str            # Verbatim triggering phrase or "[Image N: description]" for visual violations
+    quote: str            # Verbatim triggering phrase, "[Image N: description]" for visual,
+                          # or "[Video transcript: 'words']" for audio violations
 ```
 
 #### `Verdict`
@@ -1276,6 +1590,7 @@ class Verdict:
 | `PolicyNotFoundError` | Policy cache file missing |
 | `ScrapingError` | HTTP error during post fetching |
 | `JudgmentError` | Claude API error or invalid response |
+| `JsonInputError` | Invalid JSON input or missing required fields |
 
 ### Functions
 
@@ -1287,13 +1602,29 @@ Detect platform from URL. Raises `ValueError` if not supported.
 
 Load cached policies for a platform. Raises `PolicyNotFoundError` if missing.
 
-#### `judge(post: PostData, policies_text: str) -> Verdict`
+#### `judge(post: PostData, policies_text: str, provided_transcript: str = None) -> Verdict`
 
-Send post to Claude for analysis (text + images if available). Raises `JudgmentError` on failure.
+Send post to Claude for analysis (text + images if available). If `provided_transcript` is given, uses it instead of calling Whisper. Raises `JudgmentError` on failure.
 
 #### `fetch_image_as_base64(url: str) -> tuple[str, str]`
 
 Download an image and return `(base64_data, media_type)`. Raises `ScrapingError` on failure.
+
+#### `transcribe_video(video_url: str) -> str | None`
+
+Download audio from video and transcribe with Whisper. Returns transcript text or `None` on any failure (never raises).
+
+#### `parse_json_input(json_str: str) -> list[tuple[PostData, str | None]]`
+
+Parse JSON string (single object or array) into list of `(PostData, video_transcript)` tuples. Raises `JsonInputError` if invalid.
+
+#### `load_json_file(file_path: str) -> list[tuple[PostData, str | None]]`
+
+Load and parse JSON from a file. Raises `JsonInputError` if file not found or invalid.
+
+#### `load_json_stdin() -> list[tuple[PostData, str | None]]`
+
+Load and parse JSON from stdin. Raises `JsonInputError` if stdin is empty or invalid.
 
 ---
 
@@ -1307,6 +1638,19 @@ Download an image and return `(base64_data, media_type)`. Raises `ScrapingError`
 ```bash
 python policyguard.py refresh
 ```
+
+### "Policy file 'facebook_community.md' not found"
+
+**Problem:** Facebook/Instagram policy files are missing from your local `policies/` directory.
+
+**Why this happens:** Facebook and Instagram policies **cannot be auto-scraped** because Meta uses JavaScript-rendered pages and authentication walls. The `refresh` command will always fail for these platforms.
+
+**Solution:** The policy files should be included in the repository. If they're missing:
+1. Pull the latest version: `git pull origin main`
+2. Or manually copy from the repository's `policies/` folder
+3. The files are: `facebook_community.md`, `facebook_tos.md`, `instagram_community.md`, `instagram_tos.md`
+
+These are manually curated files containing Meta's essential Community Standards and Terms of Service.
 
 ### "Claude returned invalid JSON"
 
@@ -1352,6 +1696,32 @@ python policyguard.py refresh
 1. Check confidence score - low confidence means uncertainty
 2. Review the policies being used (`show-policy`)
 3. Claude is not perfect - use human review for important decisions
+
+### Video transcription not working
+
+**Problem:** Videos are being analyzed but transcripts are not included.
+
+**Solution:**
+1. Verify FFmpeg is installed: `ffmpeg -version`
+2. Verify `OPENAI_API_KEY` is set in `.env`
+3. Check that the video is accessible (not private/deleted)
+4. Note: Transcription is silent-fail by design; no errors are shown
+
+### FFmpeg not found
+
+**Problem:** yt-dlp reports "ffprobe and ffmpeg not found".
+
+**Solution:**
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu/Debian
+sudo apt install ffmpeg
+
+# Verify installation
+ffmpeg -version
+```
 
 ---
 

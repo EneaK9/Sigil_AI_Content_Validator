@@ -144,6 +144,9 @@ class RedditAdapter(BaseAdapter):
         # Extract image URLs
         image_urls = self._extract_image_urls(post)
         
+        # Extract video URLs
+        video_urls = self._extract_video_urls(post)
+        
         return PostData(
             url=url,
             platform="reddit",
@@ -151,6 +154,7 @@ class RedditAdapter(BaseAdapter):
             author=f"u/{author}" if author else "",
             title=title,
             image_urls=image_urls,
+            video_urls=video_urls,
             scraped_at=datetime.now(timezone.utc).isoformat()
         )
     
@@ -268,3 +272,26 @@ class RedditAdapter(BaseAdapter):
                 return True
         
         return False
+    
+    def _extract_video_urls(self, post: dict) -> list[str]:
+        """
+        Extract video URLs from Reddit post data.
+        
+        Args:
+            post: Reddit post data dict
+            
+        Returns:
+            List of video URLs
+        """
+        video_urls: list[str] = []
+        
+        # Check for Reddit-hosted video
+        if post.get("is_video"):
+            media = post.get("media", {})
+            reddit_video = media.get("reddit_video", {})
+            fallback_url = reddit_video.get("fallback_url")
+            
+            if fallback_url:
+                video_urls.append(self._unescape_url(fallback_url))
+        
+        return video_urls

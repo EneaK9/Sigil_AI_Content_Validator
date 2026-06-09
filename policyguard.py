@@ -5,10 +5,14 @@ PolicyGuard CLI - Social media policy compliance checker.
 Usage:
     python policyguard.py check "https://reddit.com/r/..."
     python policyguard.py check --platform facebook --text "post text here"
+    python policyguard.py check --json '{"url": "...", "message": "..."}'
+    python policyguard.py check --json-file posts.json
+    cat posts.json | python policyguard.py check --stdin
     python policyguard.py refresh
     python policyguard.py show-policy reddit
 """
 import argparse
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -24,6 +28,7 @@ from core.models import PostData, NotSupportedError, PolicyNotFoundError, Scrapi
 from core.detector import detect_platform
 from core.policy_loader import load_policies
 from core.judge import judge
+from core.json_input import parse_json_input, load_json_file, load_json_stdin, JsonInputError
 from scrapers.policy_scraper import scrape_all_policies, print_summary
 
 
@@ -62,6 +67,40 @@ def get_adapter(platform: str):
         )
 
 
+def process_single_post(
+    post: PostData, 
+    video_transcript: str,
+    quiet: bool
+) -> dict:
+    """
+    Process a single post and return the verdict dict.
+    
+    Args:
+        post: PostData object
+        video_transcript: Optional pre-transcribed video text
+        quiet: Whether to suppress status messages
+        
+    Returns:
+        Verdict as a dict
+        
+    Raises:
+        PolicyNotFoundError, JudgmentError
+    """
+    def status(msg: str) -> None:
+        if not quiet:
+            print(msg, file=sys.stderr)
+    
+    # Load policies
+    policies_text = load_policies(post.platform)
+    status(f"✓ Policies loaded for {post.platform} ({len(policies_text):,} chars)")
+    
+    # Send to Claude
+    status("⚡ Sending to Claude for analysis...")
+    verdict = judge(post, policies_text, video_transcript)
+    
+    return verdict.to_dict()
+
+
 def cmd_check(args) -> int:
     """
     Handle the 'check' command.
@@ -75,20 +114,80 @@ def cmd_check(args) -> int:
         if not quiet:
             print(msg, file=sys.stderr)
     
-    # Validate inputs
-    if args.url and args.text:
-        print("Error: Cannot specify both URL and --text. Use one or the other.", file=sys.stderr)
+    # Count how many input modes are specified
+    input_modes = sum([
+        bool(args.url),
+        bool(args.text),
+        bool(args.json),
+        bool(args.json_file),
+        bool(args.stdin)
+    ])
+    
+    if input_modes == 0:
+        print("Error: Must specify an input: URL, --text, --json, --json-file, or --stdin", file=sys.stderr)
         return 1
     
-    if not args.url and not args.text:
-        print("Error: Must specify either a URL or --text with post content.", file=sys.stderr)
+    if input_modes > 1:
+        print("Error: Cannot combine multiple input modes. Use only one of: URL, --text, --json, --json-file, --stdin", file=sys.stderr)
         return 1
     
     if args.text and not args.platform:
         print("Error: --platform is required when using --text.", file=sys.stderr)
         return 1
     
-    # Build PostData
+    # Check API key upfront
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print(
+            "Error: ANTHROPIC_API_KEY environment variable is not set.\n"
+            "Create a .env file with: ANTHROPIC_API_KEY=your-key-here",
+            file=sys.stderr
+        )
+        return 1
+    
+    # Handle JSON input modes (supports batch)
+    if args.json or args.json_file or args.stdin:
+        try:
+            if args.json:
+                posts_with_transcripts = parse_json_input(args.json)
+                status(f"✓ Parsed {len(posts_with_transcripts)} post(s) from JSON")
+            elif args.json_file:
+                posts_with_transcripts = load_json_file(args.json_file)
+                status(f"✓ Loaded {len(posts_with_transcripts)} post(s) from {args.json_file}")
+            else:  # args.stdin
+                posts_with_transcripts = load_json_stdin()
+                status(f"✓ Read {len(posts_with_transcripts)} post(s) from stdin")
+        except JsonInputError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        
+        # Process each post
+        verdicts = []
+        for i, (post, video_transcript) in enumerate(posts_with_transcripts, 1):
+            if len(posts_with_transcripts) > 1:
+                status(f"\n--- Processing post {i}/{len(posts_with_transcripts)} ---")
+            
+            try:
+                verdict_dict = process_single_post(post, video_transcript, quiet)
+                verdicts.append(verdict_dict)
+            except (PolicyNotFoundError, JudgmentError) as e:
+                print(f"Error processing post {i}: {e}", file=sys.stderr)
+                return 1
+        
+        # Output results
+        if len(verdicts) == 1:
+            json_output = json.dumps(verdicts[0], indent=2)
+        else:
+            json_output = json.dumps(verdicts, indent=2)
+        
+        print(json_output)
+        
+        if args.output:
+            Path(args.output).write_text(json_output, encoding="utf-8")
+            status(f"✓ Saved to {args.output}")
+        
+        return 0
+    
+    # Handle URL or --text input (single post, no batch)
     try:
         if args.url:
             # Auto-detect platform and fetch post
@@ -129,34 +228,18 @@ def cmd_check(args) -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     
-    # Load policies
+    # Process the single post (no pre-provided transcript for URL/text mode)
     try:
-        policies_text = load_policies(post.platform)
-        status(f"✓ Policies loaded for {post.platform} ({len(policies_text):,} chars)")
+        verdict_dict = process_single_post(post, None, quiet)
     except PolicyNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
-    
-    # Check API key
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print(
-            "Error: ANTHROPIC_API_KEY environment variable is not set.\n"
-            "Create a .env file with: ANTHROPIC_API_KEY=your-key-here",
-            file=sys.stderr
-        )
-        return 1
-    
-    # Send to Claude
-    status("⚡ Sending to Claude for analysis...")
-    
-    try:
-        verdict = judge(post, policies_text)
     except JudgmentError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     
     # Output result
-    json_output = verdict.to_json()
+    json_output = json.dumps(verdict_dict, indent=2)
     print(json_output)
     
     # Save to file if requested
@@ -226,8 +309,18 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # URL input (auto-detect platform)
   python policyguard.py check "https://reddit.com/r/example/comments/xyz/title"
+  
+  # Manual text input
   python policyguard.py check --platform facebook --text "The post text here"
+  
+  # JSON input (single post or batch array)
+  python policyguard.py check --json '{"url": "https://facebook.com/...", "message": "post text"}'
+  python policyguard.py check --json-file posts.json
+  cat posts.json | python policyguard.py check --stdin
+  
+  # Options
   python policyguard.py check "URL" --output result.json --quiet
   python policyguard.py refresh
   python policyguard.py refresh --platform reddit
@@ -240,8 +333,11 @@ Examples:
     # check command
     check_parser = subparsers.add_parser("check", help="Check a post for policy violations")
     check_parser.add_argument("url", nargs="?", help="URL of the post to check")
-    check_parser.add_argument("--text", "-t", help="Post text (for manual input)")
+    check_parser.add_argument("--text", "-t", help="Post text (for manual input, requires --platform)")
     check_parser.add_argument("--platform", "-p", help="Platform name (required with --text)")
+    check_parser.add_argument("--json", "-j", help="JSON string with post data (single object or array)")
+    check_parser.add_argument("--json-file", "-f", help="Path to JSON file with post data")
+    check_parser.add_argument("--stdin", "-s", action="store_true", help="Read JSON from stdin")
     check_parser.add_argument("--output", "-o", help="Save JSON output to file")
     check_parser.add_argument("--quiet", "-q", action="store_true", help="Only print JSON, no status messages")
     check_parser.set_defaults(func=cmd_check)
