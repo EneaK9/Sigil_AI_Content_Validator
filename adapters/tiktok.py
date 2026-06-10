@@ -122,11 +122,40 @@ class TikTokAdapter(BaseAdapter):
                 "The post may contain visual or audio content that cannot be analyzed as text.]"
             )
         
+        # Extract thumbnail/preview image from og:image
+        image_urls = self._extract_image_urls(soup)
+        
+        # TikTok post URL is the video itself
+        video_urls = [url]
+        
         return PostData(
             url=url,
             platform="tiktok",
             text=text,
             author=author,
             title="",
+            image_urls=image_urls,
+            video_urls=video_urls,
             scraped_at=datetime.now(timezone.utc).isoformat()
         )
+    
+    def _extract_image_urls(self, soup: BeautifulSoup) -> list[str]:
+        """
+        Extract image URLs from TikTok page meta tags.
+        
+        Args:
+            soup: BeautifulSoup parsed HTML
+            
+        Returns:
+            List of image URLs (typically just the og:image thumbnail)
+        """
+        image_urls: list[str] = []
+        
+        # Try og:image meta tag
+        og_image = soup.find("meta", property="og:image")
+        if og_image and og_image.get("content"):
+            image_url = og_image["content"]
+            if image_url and image_url.startswith("http"):
+                image_urls.append(image_url)
+        
+        return image_urls

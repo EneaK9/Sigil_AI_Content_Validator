@@ -54,8 +54,9 @@ class XAdapter(BaseAdapter):
         }
         
         params = {
-            "tweet.fields": "text,author_id,created_at",
-            "expansions": "author_id",
+            "tweet.fields": "text,author_id,created_at,attachments",
+            "expansions": "author_id,attachments.media_keys",
+            "media.fields": "url,type",
             "user.fields": "username"
         }
         
@@ -165,6 +166,12 @@ class XAdapter(BaseAdapter):
             if users:
                 author = f"@{users[0].get('username', '')}"
         
+        # Extract image URLs from media attachments
+        image_urls = self._extract_image_urls(data)
+        
+        # Extract video URLs from media attachments
+        video_urls = self._extract_video_urls(data, url)
+        
         if not text:
             raise ScrapingError(
                 f"Tweet has no text content. "
@@ -177,5 +184,62 @@ class XAdapter(BaseAdapter):
             text=text,
             author=author,
             title="",
+            image_urls=image_urls,
+            video_urls=video_urls,
             scraped_at=datetime.now(timezone.utc).isoformat()
         )
+    
+    def _extract_image_urls(self, data: dict) -> list[str]:
+        """
+        Extract image URLs from X API response media includes.
+        
+        Args:
+            data: Full API response data
+            
+        Returns:
+            List of image URLs
+        """
+        image_urls: list[str] = []
+        
+        includes = data.get("includes", {})
+        media_list = includes.get("media", [])
+        
+        for media in media_list:
+            media_type = media.get("type", "")
+            media_url = media.get("url", "")
+            
+            # Include photos and animated GIFs
+            if media_type in ("photo", "animated_gif") and media_url:
+                image_urls.append(media_url)
+        
+        return image_urls
+    
+    def _extract_video_urls(self, data: dict, tweet_url: str) -> list[str]:
+        """
+        Extract video URLs from X API response media includes.
+        
+        Note: Twitter API v2 doesn't return direct video URLs in basic response.
+        When a video is detected, we pass the tweet URL itself since yt-dlp
+        can handle Twitter/X URLs directly.
+        
+        Args:
+            data: Full API response data
+            tweet_url: Original tweet URL
+            
+        Returns:
+            List of video URLs (tweet URL if video media detected)
+        """
+        video_urls: list[str] = []
+        
+        includes = data.get("includes", {})
+        media_list = includes.get("media", [])
+        
+        for media in media_list:
+            media_type = media.get("type", "")
+            
+            # If video is detected, use the tweet URL (yt-dlp handles it)
+            if media_type == "video":
+                video_urls.append(tweet_url)
+                break
+        
+        return video_urls

@@ -47,6 +47,15 @@ PLATFORM_POLICY_FILES = {
     "reddit": ["reddit_content_policy.md", "reddit_user_agreement.md"],
 }
 
+# Image analysis
+MAX_IMAGES_PER_POST = 20       # Claude's hard ceiling
+PREFERRED_MAX_IMAGES = 4       # Practical limit for cost control
+MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB per image
+
+# Video transcription
+MAX_TRANSCRIPT_LENGTH_CHARS = 5000   # Truncate long transcripts to control token cost
+WHISPER_MAX_FILE_SIZE_BYTES = 24 * 1024 * 1024  # 24MB - under OpenAI's 25MB limit
+
 # Platform URL patterns for detection
 PLATFORM_PATTERNS = {
     "reddit": ["reddit.com/r/", "redd.it/"],
@@ -55,3 +64,10 @@ PLATFORM_PATTERNS = {
     "facebook": ["facebook.com/", "fb.com/", "fb.watch/"],
     "instagram": ["instagram.com/p/", "instagram.com/reel/"],
 }
+
+# API settings
+API_VERSION = "1.0.0"
+API_HOST = "0.0.0.0"
+API_PORT = 8000
+MAX_CONCURRENT_CHECKS = 10  # Parallel Claude API calls for batch processing
+JOB_EXPIRY_HOURS = 24       # Clean up completed jobs after this time
