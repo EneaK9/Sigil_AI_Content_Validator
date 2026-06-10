@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* color */
+  --ink: #16212b; /* primary text */
+  --ink-soft: #46535e; /* secondary text */
+  --muted: #7e8a91; /* tertiary / labels */
+  --paper: #e9edeb; /* app background (cool off-white) */
+  --surface: #ffffff; /* cards */
+  --surface-2: #f4f6f5; /* inset / context bar */
+  --line: #d7dedb; /* borders */
+  --line-soft: #e4e9e7; /* hairlines */
+  --petrol: #0e4c5c; /* primary / brand */
+  --petrol-deep: #0a3a47;
+  --amber: #b9741a; /* flag / attention (low severity) */
+  --alert: #a8324a; /* high-confidence violation (use sparingly) */
+  --ok: #3e7c6a; /* clean / supportive / live */
+
+  /* soft tints derived from the brand tokens (single source of truth) */
+  --amber-tint: color-mix(in srgb, var(--amber) 12%, white);
+  --alert-tint: color-mix(in srgb, var(--alert) 12%, white);
+  --ok-tint: color-mix(in srgb, var(--ok) 12%, white);
+  --petrol-tint: color-mix(in srgb, var(--petrol) 8%, white);
+
+  /* radius */
+  --r: 12px;
+
+  /* fonts (set by next/font in layout.tsx; fallbacks here for safety) */
+  --font-display:
+    var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    var(--font-ibm-plex-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--line);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Mono is part of the identity for all data, numbers, handles, timestamps. */
+  .font-mono {
+    font-feature-settings: 'tnum' 1;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--petrol);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@layer components {
+  /* Eyebrow: uppercase, letter-spaced display label */
+  .eyebrow {
+    font-family: var(--font-display);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--muted);
+  }
+}
+
+@layer utilities {
+  .rise-in {
+    animation: rise-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
