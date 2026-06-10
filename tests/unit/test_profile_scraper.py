@@ -99,32 +99,34 @@ class TestParseCount:
 class TestScrapeTikTokProfile:
     """Tests for TikTok profile scraping."""
     
-    @patch("core.profile_scraper.requests.get")
-    def test_successful_scrape(self, mock_get):
+    @patch("core.profile_scraper.requests.Session")
+    def test_successful_scrape(self, mock_session_class):
+        mock_session = MagicMock()
+        mock_session_class.return_value = mock_session
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.text = """
-        <html>
-        <head>
-            <meta property="og:description" content="1.5M Followers, 100 Following, 50 Videos. Check out my content!">
-            <meta property="og:image" content="https://example.com/avatar.jpg">
-            <title>@testuser | TikTok</title>
-        </head>
-        </html>
-        """
-        mock_get.return_value = mock_response
+        # TikTok embeds JSON data in HTML - test that format
+        mock_response.text = '''
+        <html><body>
+        <script>{"stats":{"followerCount":1500000,"followingCount":100,"heartCount":5000000,"videoCount":50},"user":{"signature":"Test bio","nickname":"Test User","verified":false,"avatarLarger":"https://example.com/avatar.jpg"}}</script>
+        </body></html>
+        '''
+        mock_session.get.return_value = mock_response
         
         result = scrape_tiktok_profile("https://www.tiktok.com/@testuser")
         
         assert result["username"] == "testuser"
         assert result["follower_count"] == 1500000
         assert result["following_count"] == 100
+        assert result["video_count"] == 50
     
-    @patch("core.profile_scraper.requests.get")
-    def test_http_error(self, mock_get):
+    @patch("core.profile_scraper.requests.Session")
+    def test_http_error(self, mock_session_class):
+        mock_session = MagicMock()
+        mock_session_class.return_value = mock_session
         mock_response = MagicMock()
         mock_response.status_code = 404
-        mock_get.return_value = mock_response
+        mock_session.get.return_value = mock_response
         
         with pytest.raises(ScrapingError) as exc_info:
             scrape_tiktok_profile("https://www.tiktok.com/@nonexistent")

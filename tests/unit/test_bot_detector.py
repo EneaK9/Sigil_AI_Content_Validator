@@ -534,6 +534,60 @@ class TestDetectTiktok:
         }
         result = detect_tiktok(account)
         assert result.verdict == BotVerdict.BOT
+    
+    def test_recent_posting_burst_flagged(self):
+        """Recent posting burst triggers signal."""
+        account = {
+            "username": "burst_poster",
+            "follower_count": 1000,
+            "following_count": 100,
+            "video_count": 500,
+            "recent_video_count": 200,  # 200 videos in 30 days = 6.7/day
+            "profile_image": "https://example.com/avatar.jpg",
+        }
+        result = detect_tiktok(account)
+        triggered_names = {s.name for s in result.signals if s.triggered}
+        assert "recent_posting_burst" in triggered_names
+    
+    def test_extreme_recent_burst_bot(self):
+        """Extreme recent posting = BOT."""
+        account = {
+            "username": "spam_bot",
+            "follower_count": 500,
+            "following_count": 50,
+            "video_count": 600,
+            "recent_video_count": 500,  # 500 in 30 days = 16.7/day
+            "profile_image": "https://example.com/avatar.jpg",
+        }
+        result = detect_tiktok(account)
+        triggered_names = {s.name for s in result.signals if s.triggered}
+        assert "extreme_recent_burst" in triggered_names
+        assert result.verdict == BotVerdict.BOT
+    
+    def test_video_timestamps_calculates_recent(self):
+        """Video timestamps are used to calculate recent count."""
+        import time
+        now = time.time()
+        # 10 videos in last 30 days, 5 older
+        timestamps = [
+            now - (5 * 24 * 60 * 60),   # 5 days ago
+            now - (10 * 24 * 60 * 60),  # 10 days ago
+            now - (15 * 24 * 60 * 60),  # 15 days ago
+            now - (60 * 24 * 60 * 60),  # 60 days ago (outside window)
+        ]
+        account = {
+            "username": "timestamp_test",
+            "follower_count": 1000,
+            "following_count": 100,
+            "video_count": 4,
+            "video_timestamps": timestamps,
+            "profile_image": "https://example.com/avatar.jpg",
+        }
+        result = detect_tiktok(account)
+        # Should have calculated recent_videos = 3 (within 30 days)
+        # 3/30 = 0.1/day, not enough to trigger burst
+        triggered_names = {s.name for s in result.signals if s.triggered}
+        assert "recent_posting_burst" not in triggered_names
 
 
 # =============================================================================

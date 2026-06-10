@@ -203,6 +203,127 @@ def _get_account_age_days(created_at: Any) -> Optional[int]:
     return (now - created).days
 
 
+def _add_activity_signals(
+    signals: List[BotSignal],
+    account_data: Dict[str, Any],
+    post_count_field: str = "post_count",
+    comment_count_field: str = "comment_count",
+) -> None:
+    """
+    Add universal activity-based bot signals to any platform.
+    
+    These signals catch:
+    - Recent posting bursts (high activity in last 30 days)
+    - High comment frequency (excessive commenting)
+    - New account + high activity (suspicious combination)
+    - Extreme automation patterns
+    
+    Args:
+        signals: List to append signals to
+        account_data: Account data dictionary
+        post_count_field: Field name for total post count
+        comment_count_field: Field name for total comment count
+    """
+    # Get activity data
+    post_count = account_data.get(post_count_field, 0) or account_data.get("video_count", 0) or account_data.get("tweet_count", 0) or account_data.get("media_count", 0)
+    recent_posts = account_data.get("recent_post_count") or account_data.get("recent_video_count") or account_data.get("posts_last_30_days", 0)
+    recent_comments = account_data.get("recent_comment_count") or account_data.get("comments_last_30_days", 0)
+    total_comments = account_data.get(comment_count_field, 0) or account_data.get("total_comments", 0)
+    age_days = _get_account_age_days(account_data.get("created_at"))
+    
+    # Calculate from timestamps if provided
+    post_timestamps = account_data.get("post_timestamps") or account_data.get("video_timestamps", [])
+    comment_timestamps = account_data.get("comment_timestamps", [])
+    
+    if post_timestamps and not recent_posts:
+        now = datetime.now(timezone.utc).timestamp()
+        thirty_days_ago = now - (30 * 24 * 60 * 60)
+        recent_posts = sum(1 for ts in post_timestamps if ts > thirty_days_ago)
+    
+    if comment_timestamps and not recent_comments:
+        now = datetime.now(timezone.utc).timestamp()
+        thirty_days_ago = now - (30 * 24 * 60 * 60)
+        recent_comments = sum(1 for ts in comment_timestamps if ts > thirty_days_ago)
+    
+    # === RECENT POSTING BURST ===
+    if recent_posts > 0:
+        recent_posts_per_day = recent_posts / 30
+        signals.append(BotSignal(
+            name="recent_posting_burst",
+            triggered=recent_posts_per_day > 5,
+            weight=BOT_SIGNAL_WEIGHTS["high"],
+            evidence=f"Recent burst: {recent_posts} posts in last 30 days ({recent_posts_per_day:.1f}/day)"
+        ))
+        signals.append(BotSignal(
+            name="extreme_recent_burst",
+            triggered=recent_posts_per_day > 15,
+            weight=BOT_SIGNAL_WEIGHTS["critical"],
+            evidence=f"Extreme posting: {recent_posts} posts in 30 days ({recent_posts_per_day:.1f}/day)"
+        ))
+    
+    # === HIGH COMMENT FREQUENCY ===
+    if recent_comments > 0:
+        comments_per_day = recent_comments / 30
+        signals.append(BotSignal(
+            name="high_comment_frequency",
+            triggered=comments_per_day > 20,
+            weight=BOT_SIGNAL_WEIGHTS["high"],
+            evidence=f"High commenting: {recent_comments} comments in 30 days ({comments_per_day:.1f}/day)"
+        ))
+        signals.append(BotSignal(
+            name="extreme_comment_frequency",
+            triggered=comments_per_day > 50,
+            weight=BOT_SIGNAL_WEIGHTS["critical"],
+            evidence=f"Extreme commenting: {recent_comments} comments in 30 days ({comments_per_day:.1f}/day)"
+        ))
+    
+    # === LIFETIME COMMENT VOLUME ===
+    if total_comments > 0 and age_days and age_days > 0:
+        lifetime_comments_per_day = total_comments / age_days
+        signals.append(BotSignal(
+            name="high_lifetime_comments",
+            triggered=lifetime_comments_per_day > 10,
+            weight=BOT_SIGNAL_WEIGHTS["high"],
+            evidence=f"High lifetime commenting: {total_comments} total ({lifetime_comments_per_day:.1f}/day avg)"
+        ))
+    
+    # === NEW ACCOUNT + HIGH ACTIVITY ===
+    if age_days is not None and age_days < 30:
+        # New account with lots of posts
+        if post_count > 50:
+            signals.append(BotSignal(
+                name="new_account_high_posts",
+                triggered=True,
+                weight=BOT_SIGNAL_WEIGHTS["high"],
+                evidence=f"New account ({age_days} days) with {post_count} posts"
+            ))
+        
+        # New account with lots of comments
+        if total_comments > 100 or recent_comments > 50:
+            signals.append(BotSignal(
+                name="new_account_high_comments",
+                triggered=True,
+                weight=BOT_SIGNAL_WEIGHTS["high"],
+                evidence=f"New account ({age_days} days) with many comments"
+            ))
+    
+    # === LIFETIME POSTING RATE (if we have creation date) ===
+    if age_days and age_days > 0 and post_count > 0:
+        lifetime_posts_per_day = post_count / age_days
+        signals.append(BotSignal(
+            name="high_lifetime_posting",
+            triggered=lifetime_posts_per_day > 5,
+            weight=BOT_SIGNAL_WEIGHTS["high"],
+            evidence=f"High lifetime posting: {post_count} posts in {age_days} days ({lifetime_posts_per_day:.1f}/day)"
+        ))
+        signals.append(BotSignal(
+            name="extreme_lifetime_posting",
+            triggered=lifetime_posts_per_day > 20,
+            weight=BOT_SIGNAL_WEIGHTS["critical"],
+            evidence=f"Extreme automation: {post_count} posts in {age_days} days ({lifetime_posts_per_day:.1f}/day)"
+        ))
+
+
 # =============================================================================
 # Platform-Specific Detectors
 # =============================================================================
@@ -308,6 +429,9 @@ def detect_x(account_data: Dict[str, Any]) -> BotScore:
             weight=BOT_SIGNAL_WEIGHTS["medium"],
             evidence=f"Not listed by anyone despite being {age_days} days old"
         ))
+    
+    # Universal activity signals
+    _add_activity_signals(signals, account_data, post_count_field="tweet_count")
 
     return score_account(signals, platform="x", username=username)
 
@@ -409,6 +533,9 @@ def detect_reddit(account_data: Dict[str, Any]) -> BotScore:
         weight=BOT_SIGNAL_WEIGHTS["low"],
         evidence="Using default Reddit avatar"
     ))
+    
+    # Universal activity signals
+    _add_activity_signals(signals, account_data, post_count_field="link_karma", comment_count_field="total_comments")
 
     return score_account(signals, platform="reddit", username=username)
 
@@ -493,6 +620,9 @@ def detect_tiktok(account_data: Dict[str, Any]) -> BotScore:
         weight=BOT_SIGNAL_WEIGHTS["medium"],
         evidence="Using default profile image"
     ))
+    
+    # Universal activity signals (handles recent bursts, posting frequency, etc.)
+    _add_activity_signals(signals, account_data, post_count_field="video_count")
 
     return score_account(signals, platform="tiktok", username=username)
 
@@ -591,6 +721,9 @@ def detect_instagram(account_data: Dict[str, Any]) -> BotScore:
         weight=BOT_SIGNAL_WEIGHTS["medium"],
         evidence=f"Username '{username}' matches bot pattern"
     ))
+    
+    # Universal activity signals
+    _add_activity_signals(signals, account_data, post_count_field="media_count")
 
     return score_account(signals, platform="instagram", username=username)
 
@@ -693,6 +826,9 @@ def detect_facebook(account_data: Dict[str, Any]) -> BotScore:
         weight=BOT_SIGNAL_WEIGHTS["high"],
         evidence="Bio contains spam indicators"
     ))
+    
+    # Universal activity signals
+    _add_activity_signals(signals, account_data, post_count_field="post_count")
 
     return score_account(signals, platform="facebook", username=username)
 

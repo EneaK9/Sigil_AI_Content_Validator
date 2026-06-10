@@ -110,26 +110,48 @@ def scrape_tiktok_profile(url: str) -> Dict[str, Any]:
     """
     Scrape TikTok profile data.
     
-    TikTok profiles show follower/following counts in meta tags and page content.
+    TikTok embeds profile JSON data in the HTML which includes follower counts,
+    video counts, and other metrics.
     """
+    import time
+    import random
+    
+    # Randomize user agent slightly to avoid detection
+    chrome_version = random.randint(119, 125)
     headers = {
-        "User-Agent": SCRAPER_USER_AGENT,
-        "Accept": "text/html,application/xhtml+xml",
+        "User-Agent": f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version}.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Sec-Ch-Ua": f'"Chromium";v="{chrome_version}", "Google Chrome";v="{chrome_version}", "Not-A.Brand";v="99"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"macOS"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        # Use a fresh session with cookies enabled
+        session = requests.Session()
+        # Add small delay to appear more human-like
+        time.sleep(random.uniform(0.1, 0.3))
+        response = session.get(url, headers=headers, timeout=20, allow_redirects=True)
     except requests.RequestException as e:
         raise ScrapingError(f"Failed to fetch TikTok profile: {e}")
     
     if response.status_code != 200:
         raise ScrapingError(f"TikTok returned HTTP {response.status_code}")
     
-    soup = BeautifulSoup(response.text, "html.parser")
+    html = response.text
     username = _extract_username_from_url(url, "tiktok")
     
-    # Try to extract data from meta tags and scripts
+    logger.debug(f"[PROFILE] TikTok response length: {len(html)}")
+    
+    # Initialize with defaults
     account_data = {
         "username": username,
         "follower_count": 0,
@@ -141,46 +163,70 @@ def scrape_tiktok_profile(url: str) -> Dict[str, Any]:
         "is_verified": False,
     }
     
-    # Extract from og:description which often contains follower info
-    og_desc = soup.find("meta", property="og:description")
-    if og_desc and og_desc.get("content"):
-        desc = og_desc["content"]
-        
-        # Parse patterns like "123.4K Followers, 50 Following, 10 Videos"
-        followers_match = re.search(r"([\d.]+[KMB]?)\s*Followers", desc, re.IGNORECASE)
-        following_match = re.search(r"([\d.]+[KMB]?)\s*Following", desc, re.IGNORECASE)
-        likes_match = re.search(r"([\d.]+[KMB]?)\s*Likes", desc, re.IGNORECASE)
-        
-        if followers_match:
-            account_data["follower_count"] = _parse_count(followers_match.group(1))
-        if following_match:
-            account_data["following_count"] = _parse_count(following_match.group(1))
-        if likes_match:
-            account_data["like_count"] = _parse_count(likes_match.group(1))
+    # TikTok embeds JSON data in the HTML - extract using simple patterns
     
-    # Extract bio from meta description
-    meta_desc = soup.find("meta", attrs={"name": "description"})
-    if meta_desc and meta_desc.get("content"):
-        # Bio is often after the stats in the description
-        content = meta_desc["content"]
-        # Try to extract the actual bio text (after stats)
-        bio_match = re.search(r"Videos?\.\s*(.+)", content)
-        if bio_match:
-            account_data["bio"] = bio_match.group(1).strip()
+    # Extract followerCount
+    follower_match = re.search(r'"followerCount":(\d+)', html)
+    if follower_match:
+        account_data["follower_count"] = int(follower_match.group(1))
     
-    # Extract profile image from og:image
-    og_image = soup.find("meta", property="og:image")
-    if og_image and og_image.get("content"):
-        account_data["profile_image"] = og_image["content"]
+    # Extract followingCount
+    following_match = re.search(r'"followingCount":(\d+)', html)
+    if following_match:
+        account_data["following_count"] = int(following_match.group(1))
     
-    # Check for verified badge in title
-    title_tag = soup.find("title")
-    if title_tag:
-        title_text = title_tag.get_text()
-        if "✓" in title_text or "verified" in title_text.lower():
-            account_data["is_verified"] = True
+    # Extract heartCount (total likes received)
+    heart_match = re.search(r'"heartCount":(\d+)', html)
+    if heart_match:
+        account_data["like_count"] = int(heart_match.group(1))
     
-    logger.info(f"[PROFILE] TikTok @{username}: {account_data['follower_count']} followers")
+    # Extract videoCount
+    video_match = re.search(r'"videoCount":(\d+)', html)
+    if video_match:
+        account_data["video_count"] = int(video_match.group(1))
+    
+    # Extract signature (bio)
+    sig_match = re.search(r'"signature":"([^"]*)"', html)
+    if sig_match:
+        try:
+            account_data["bio"] = sig_match.group(1).encode().decode('unicode_escape')
+        except Exception:
+            account_data["bio"] = sig_match.group(1)
+    
+    # Extract nickname
+    nick_match = re.search(r'"nickname":"([^"]*)"', html)
+    if nick_match:
+        try:
+            account_data["nickname"] = nick_match.group(1).encode().decode('unicode_escape')
+        except Exception:
+            account_data["nickname"] = nick_match.group(1)
+    
+    # Extract verified status
+    verified_match = re.search(r'"verified":(true|false)', html, re.IGNORECASE)
+    if verified_match:
+        account_data["is_verified"] = verified_match.group(1).lower() == "true"
+    
+    # Extract account creation time (Unix timestamp)
+    create_match = re.search(r'"createTime":(\d+)', html)
+    if create_match:
+        account_data["created_at"] = int(create_match.group(1))
+    
+    # Extract avatar
+    avatar_match = re.search(r'"avatarLarger":"([^"]+)"', html)
+    if avatar_match:
+        try:
+            account_data["profile_image"] = avatar_match.group(1).encode().decode('unicode_escape')
+        except Exception:
+            account_data["profile_image"] = avatar_match.group(1)
+    
+    # Fallback to og:image if no avatar found
+    if not account_data["profile_image"]:
+        soup = BeautifulSoup(html, "html.parser")
+        og_image = soup.find("meta", property="og:image")
+        if og_image and og_image.get("content"):
+            account_data["profile_image"] = og_image["content"]
+    
+    logger.info(f"[PROFILE] TikTok @{username}: {account_data['follower_count']} followers, {account_data['video_count']} videos")
     
     return account_data
 
