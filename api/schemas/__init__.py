@@ -10,8 +10,21 @@ from api.schemas.responses import (
     HealthResponse,
     ErrorResponse,
 )
+from api.schemas.bot import (
+    BotCheckRequest,
+    BotCheckUrlRequest,
+    BotCheckUrlBatchRequest,
+    BotBatchRequest,
+    BotSignalResponse,
+    BotCheckResponse,
+    BotBatchJobResponse,
+    BotBatchResultResponse,
+    BotArbitrateRequest,
+    BotArbitrateResponse,
+)
 
 __all__ = [
+    # Content check schemas
     "PostInput",
     "BatchInput",
     "VerdictResponse",
@@ -20,4 +33,15 @@ __all__ = [
     "JobProgress",
     "HealthResponse",
     "ErrorResponse",
+    # Bot detection schemas
+    "BotCheckRequest",
+    "BotCheckUrlRequest",
+    "BotCheckUrlBatchRequest",
+    "BotBatchRequest",
+    "BotSignalResponse",
+    "BotCheckResponse",
+    "BotBatchJobResponse",
+    "BotBatchResultResponse",
+    "BotArbitrateRequest",
+    "BotArbitrateResponse",
 ]

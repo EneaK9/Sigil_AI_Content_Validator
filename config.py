@@ -71,3 +71,53 @@ API_HOST = "0.0.0.0"
 API_PORT = 8000
 MAX_CONCURRENT_CHECKS = 10  # Parallel Claude API calls for batch processing
 JOB_EXPIRY_HOURS = 24       # Clean up completed jobs after this time
+
+# Bot Detection Configuration
+BOT_SIGNAL_WEIGHTS = {
+    "low": 1,
+    "medium": 2,
+    "high": 3,
+    "critical": 5,
+}
+
+BOT_VERDICT_THRESHOLDS = {
+    "BOT": {"min_score": 10, "min_signals": 4},
+    "SUSPICIOUS": {"min_score": 5, "min_signals": 2},
+}
+
+# Immediate BOT patterns - if ALL signals in a tuple trigger, verdict is BOT regardless of score
+BOT_IMMEDIATE_PATTERNS = {
+    "x": [
+        ("tweet_count_lt_5", "account_age_lt_30", "following_gt_4900"),
+    ],
+    "tiktok": [
+        ("video_count_zero", "followers_gt_10000"),
+    ],
+    "instagram": [
+        ("media_count_zero", "followers_gt_5000", "bio_spam"),
+    ],
+    "facebook": [
+        ("created_lt_30_days", "followers_gt_10000", "link_only_posts"),
+    ],
+    "reddit": [
+        ("karma_farm_subs", "template_comments", "account_age_lt_7"),
+    ],
+}
+
+# Bio spam detection terms
+BOT_BIO_SPAM_TERMS = [
+    "telegram", "whatsapp", "dm for", "crypto", "nft", "invest",
+    "forex", "bitcoin", "earn money", "passive income", "link in bio",
+]
+
+# Known karma farming subreddits
+REDDIT_KARMA_FARM_SUBS = [
+    "freekarma4u", "freekarma4you", "karma", "karmawhore",
+    "freekarma", "karmafarming", "upvote4upvote",
+]
+
+# Automation sources that indicate bot behavior (X/Twitter)
+BOT_AUTOMATION_SOURCES = {
+    "IFTTT", "Zapier", "Buffer API", "Hootsuite", "dlvr.it",
+    "TweetDeck", "SocialFlow", "Sprout Social",
+}

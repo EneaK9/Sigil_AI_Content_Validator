@@ -3,7 +3,11 @@ Data models and custom exceptions for PolicyGuard.
 """
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
+from typing import Optional, TYPE_CHECKING
 import json
+
+if TYPE_CHECKING:
+    from core.bot_detector import BotScore
 
 
 # Custom Exceptions
@@ -41,6 +45,7 @@ class PostData:
     image_urls: list[str] = field(default_factory=list)
     video_urls: list[str] = field(default_factory=list)
     scraped_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    bot_score: Optional["BotScore"] = None  # Bot detection result for the author
 
     def __post_init__(self) -> None:
         """Validate that platform is supported."""

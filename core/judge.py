@@ -37,7 +37,43 @@ Rules you must follow:
 7. If a video transcript is provided, analyze it with the same rigor as the post text.
    Violations found in transcripts are just as serious as violations in text.
    In the "quote" field for transcript violations, include the relevant excerpt and label it,
-   e.g.: "[Video transcript: 'exact words spoken here']"."""
+   e.g.: "[Video transcript: 'exact words spoken here']".
+8. ACCOUNT AUTHENTICITY: If an [Account Analysis] block is present, factor the bot verdict
+   into your moderation decision. A BOT verdict does not change whether content violates
+   policy — violations are violations regardless. However, BOT accounts coordinating to
+   spread violating content should be noted as higher risk due to amplification potential.
+   Note the bot verdict in your explanation when relevant."""
+
+
+def build_bot_context(post: PostData) -> str:
+    """
+    Build account analysis context from bot detection results.
+    
+    Args:
+        post: PostData object with optional bot_score
+        
+    Returns:
+        Formatted bot context string, or empty string if no bot analysis
+    """
+    if not post.bot_score:
+        return ""
+    
+    from core.bot_detector import BotVerdict
+    
+    score = post.bot_score
+    if score.verdict == BotVerdict.UNKNOWN:
+        return ""
+    
+    triggered = [s for s in score.signals if s.triggered]
+    signal_summary = "; ".join(s.evidence for s in triggered[:5])
+    
+    return f"""
+
+[Account Analysis]
+Bot Verdict: {score.verdict.value} (confidence: {score.confidence:.0%})
+Score: {score.score} across {len(triggered)} signals
+Key signals: {signal_summary}
+"""
 
 
 def build_user_prompt(post: PostData, policies_text: str, transcript_text: str = "") -> str:
@@ -52,6 +88,9 @@ def build_user_prompt(post: PostData, policies_text: str, transcript_text: str =
     Returns:
         Formatted user prompt string
     """
+    # Build bot context if available
+    bot_context = build_bot_context(post)
+    
     prompt = f"""PLATFORM: {post.platform}
 
 POST URL: {post.url}
@@ -60,7 +99,7 @@ POST TITLE: {post.title}
 POST TEXT:
 ---
 {post.text}
----
+---{bot_context}
 
 PLATFORM POLICIES (Community Guidelines + Terms of Service):
 ---

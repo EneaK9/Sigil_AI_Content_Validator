@@ -43,6 +43,11 @@ PolicyGuard analyzes social media posts against platform-specific Community Guid
   - [Single Post Analysis](#single-post-analysis)
   - [Batch Processing (Async)](#batch-processing-async)
   - [API Examples](#api-examples)
+- [Bot Detection](#bot-detection)
+  - [How It Works](#how-bot-detection-works)
+  - [Bot Detection API](#bot-detection-api)
+  - [Signal Weights](#signal-weights)
+  - [Verdicts and Thresholds](#verdicts-and-thresholds)
 - [Output Format](#output-format)
 - [JSON Input Contract](#json-input-contract)
 - [Image Analysis](#image-analysis)
@@ -88,6 +93,16 @@ PolicyGuard analyzes social media posts against platform-specific Community Guid
 - **CORS Enabled**: Ready for browser-based integrations
 - **No Authentication Required**: Public API by default (add auth as needed)
 
+### Bot Detection
+- **Signal Stacking**: Detects bots using multiple converging signals (no single signal decides)
+- **5 Platform Detectors**: X, Reddit, TikTok, Instagram, Facebook
+- **URL-Based Detection**: Pass a profile URL and we scrape + analyze automatically
+- **JSON-Based Detection**: Pass pre-fetched account data for direct analysis
+- **Configurable Thresholds**: All weights and thresholds tunable in `config.py`
+- **Immediate Patterns**: Known bot combinations trigger instant BOT verdict
+- **Claude Arbitration**: Use AI to resolve borderline SUSPICIOUS cases
+- **REST API**: `POST /api/v1/bot/check` (JSON) or `POST /api/v1/bot/check/url` (URL)
+
 ### Output
 - **Detailed Verdicts**: Get comprehensive JSON output with:
   - Pass/Fail verdict
@@ -101,7 +116,7 @@ PolicyGuard analyzes social media posts against platform-specific Community Guid
 - **Policy Caching**: Platform policies are cached locally for fast, offline-capable analysis
 - **Extensible Architecture**: Easy to add new platforms with the adapter pattern
 - **Robust Error Handling**: Clear, actionable error messages for every failure mode
-- **Comprehensive Test Suite**: 306 tests covering unit, integration, edge cases, API endpoints, and AI judgment quality
+- **Comprehensive Test Suite**: 416 tests covering unit, integration, edge cases, API endpoints, bot detection, profile scraping, and AI judgment quality
 
 ---
 
@@ -718,6 +733,255 @@ The API provides comprehensive logging to help you monitor request processing. L
 - `policyguard.services.batch` - Batch processing progress
 - `policyguard.services.checker` - Policy loading
 - `policyguard.services.jobstore` - Job state changes
+
+---
+
+## Bot Detection
+
+PolicyGuard includes a comprehensive bot detection system that analyzes social media accounts for automated/inauthentic behavior. The system uses **signal stacking** — no single signal is enough, but multiple converging signals provide high confidence.
+
+### How Bot Detection Works
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           Bot Detection Flow                                │
+│                                                                             │
+│   Account Data ─────▶ Platform Detector ─────▶ Signal Scoring ─────▶ Verdict│
+│   (metrics,           (X, Reddit, TikTok,      (weighted sum,       (HUMAN, │
+│    activity,           Instagram, Facebook)     threshold check)    SUSPICIOUS│
+│    patterns)                                                         or BOT) │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Principles:**
+- **Signal Stacking**: 1 signal = noise, 2 = suspicious, 3+ converging = high confidence
+- **Platform-Specific**: Each platform has unique bot patterns
+- **Immediate Patterns**: Some combinations trigger BOT verdict instantly
+- **Configurable Thresholds**: All thresholds in `config.py` for tuning
+
+### Bot Detection API
+
+#### POST /api/v1/bot/check
+Analyze a single account for bot signals.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8000/api/v1/bot/check \
+  -H "Content-Type: application/json" \
+  -d '{
+    "platform": "x",
+    "username": "suspicious_user",
+    "account_data": {
+      "created_at": "2026-05-01T00:00:00Z",
+      "followers_count": 50,
+      "following_count": 4950,
+      "tweet_count": 3,
+      "description": "DM for crypto tips! Telegram: @scam",
+      "default_profile_image": true
+    }
+  }'
+```
+
+**Response:**
+```json
+{
+  "verdict": "BOT",
+  "score": 15,
+  "confidence": 0.97,
+  "platform": "x",
+  "username": "suspicious_user",
+  "signals": [
+    {"name": "account_age_lt_90", "triggered": true, "weight": 2, "evidence": "Account is 40 days old"},
+    {"name": "tweet_count_lt_5", "triggered": true, "weight": 3, "evidence": "Only 3 total tweets"},
+    {"name": "following_gt_4900", "triggered": true, "weight": 3, "evidence": "Following 4950 accounts (near platform ceiling)"},
+    {"name": "bio_spam", "triggered": true, "weight": 3, "evidence": "Bio contains spam indicators"}
+  ],
+  "triggered_count": 4,
+  "checked_at": "2026-06-10T10:30:00+00:00"
+}
+```
+
+#### POST /api/v1/bot/check/url
+Scrape a profile from URL and analyze for bot signals.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8000/api/v1/bot/check/url \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.tiktok.com/@suspicious_user"}'
+```
+
+**Response:**
+```json
+{
+  "verdict": "SUSPICIOUS",
+  "score": 6,
+  "confidence": 0.55,
+  "platform": "tiktok",
+  "username": "suspicious_user",
+  "signals": [...],
+  "triggered_count": 2,
+  "checked_at": "2026-06-10T10:30:00+00:00",
+  "account_data": {
+    "username": "suspicious_user",
+    "follower_count": 50000,
+    "following_count": 200,
+    "video_count": 0,
+    "bio": "",
+    "_scraped_from_url": "https://www.tiktok.com/@suspicious_user",
+    "_scraped_at": "2026-06-10T10:30:00+00:00"
+  }
+}
+```
+
+**Supported URL Formats:**
+- **TikTok**: `https://www.tiktok.com/@username`
+- **X/Twitter**: `https://x.com/username` or `https://twitter.com/username`
+- **Reddit**: `https://www.reddit.com/user/username`
+- **Instagram**: `https://www.instagram.com/username`
+- **Facebook**: `https://www.facebook.com/username`
+
+#### POST /api/v1/bot/check/url/batch
+Scrape and analyze multiple profile URLs asynchronously.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8000/api/v1/bot/check/url/batch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "urls": [
+      "https://www.tiktok.com/@user1",
+      "https://x.com/user2",
+      "https://www.reddit.com/user/user3"
+    ]
+  }'
+```
+
+**Response:**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "total": 3,
+  "status": "pending"
+}
+```
+
+#### POST /api/v1/bot/check/batch
+Analyze multiple accounts asynchronously (JSON data).
+
+**Request:**
+```bash
+curl -X POST http://localhost:8000/api/v1/bot/check/batch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "accounts": [
+      {"platform": "x", "account_data": {"username": "user1", "tweet_count": 100}},
+      {"platform": "reddit", "account_data": {"username": "user2", "link_karma": 500}}
+    ]
+  }'
+```
+
+**Response:**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "total": 2,
+  "status": "pending"
+}
+```
+
+#### GET /api/v1/bot/jobs/{job_id}
+Poll for batch results (same as content check jobs).
+
+#### POST /api/v1/bot/arbitrate
+Use Claude to make a final verdict on SUSPICIOUS accounts.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/bot/arbitrate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "platform": "x",
+    "username": "edge_case_user",
+    "account_data": {"followers_count": 500, "following_count": 2000},
+    "triggered_signals": [
+      {"name": "low_follower_ratio", "triggered": true, "weight": 3, "evidence": "Ratio is 0.25"}
+    ]
+  }'
+```
+
+### Signal Weights
+
+| Weight | Level | Examples |
+|--------|-------|----------|
+| 1 | Low | Default avatar, many followers (alone) |
+| 2 | Medium | Account age < 90 days, username pattern |
+| 3 | High | Following near ceiling, bio spam, template comments |
+| 5 | Critical | Coordinated behavior (instant BOT) |
+
+### Verdicts and Thresholds
+
+| Verdict | Score | Signals | Description |
+|---------|-------|---------|-------------|
+| **UNKNOWN** | 0 | 0 | Not enough data to analyze |
+| **HUMAN** | 1-4 | 1 | Likely real account |
+| **SUSPICIOUS** | 5-9 | 2+ | Needs review or Claude arbitration |
+| **BOT** | 10+ | 4+ | High confidence automated account |
+
+**Immediate BOT Patterns** (bypass threshold scoring):
+
+| Platform | Pattern |
+|----------|---------|
+| X | `tweet_count < 5` + `account_age < 30 days` + `following > 4900` |
+| TikTok | `video_count = 0` + `followers > 10,000` |
+| Instagram | `media_count = 0` + `followers > 5,000` + `bio_spam` |
+| Reddit | `karma_farm_subs` + `template_comments` + `account_age < 7 days` |
+| Facebook | `created < 30 days` + `followers > 10,000` + `link_only_posts` |
+
+### Platform-Specific Signals
+
+**X (Twitter)**
+- Account age, tweet count, follower ratio
+- Following near 5000 ceiling
+- Bio spam (crypto/telegram/etc.)
+- Automation tool sources (IFTTT, Zapier, etc.)
+
+**Reddit**
+- Account age, karma levels
+- Email verification status
+- Karma farming subreddits
+- Template/duplicate comments
+
+**TikTok**
+- Video count, follower ratio
+- Engagement rate (< 0.5% = suspicious)
+- Unverified with massive following
+
+**Instagram**
+- Post count, follower ratio
+- Engagement rate by tier
+- Follow/unfollow patterns
+
+**Facebook**
+- Page creation date
+- Link-only posting patterns
+- Rapid group joins
+- Template comments
+
+### Integration with Content Moderation
+
+Bot scores are automatically included in content verdicts when available:
+
+```json
+{
+  "verdict": "FAIL",
+  "violations": [...],
+  "account_analysis": {
+    "bot_verdict": "BOT",
+    "confidence": 0.95,
+    "note": "Content from BOT account flagged with higher severity"
+  }
+}
+```
 
 ---
 
@@ -1753,12 +2017,14 @@ policyguard/
 │   ├── routes/                 # API endpoint handlers
 │   │   ├── __init__.py
 │   │   ├── check.py            # POST /check, POST /check/batch
+│   │   ├── bot.py              # POST /bot/check, /bot/arbitrate
 │   │   ├── jobs.py             # GET/DELETE /jobs/{id}
 │   │   └── health.py           # GET /health
 │   └── schemas/                # Pydantic request/response models
 │       ├── __init__.py
 │       ├── requests.py         # PostInput, BatchInput
-│       └── responses.py        # VerdictResponse, JobResponse, etc.
+│       ├── responses.py        # VerdictResponse, JobResponse, etc.
+│       └── bot.py              # BotCheckRequest/Response, etc.
 │
 ├── services/                   # Business logic orchestration
 │   ├── __init__.py
@@ -1768,6 +2034,8 @@ policyguard/
 │
 ├── core/                       # Core business logic
 │   ├── __init__.py
+│   ├── bot_detector.py         # Bot detection (signal stacking)
+│   ├── profile_scraper.py      # Profile scraping for bot detection
 │   ├── detector.py             # URL → platform detection
 │   ├── image_fetcher.py        # Download + base64 encode images
 │   ├── json_input.py           # Parse JSON input contract
@@ -1804,12 +2072,12 @@ policyguard/
 ├── debug/                      # Debug output
 │   └── last_response.txt       # Saved when Claude returns invalid JSON
 │
-├── tests/                      # Test suite (306 tests)
+├── tests/                      # Test suite (416 tests)
 │   ├── conftest.py             # Shared fixtures
-│   ├── unit/                   # Unit tests
+│   ├── unit/                   # Unit tests (bot detector, profile scraper)
 │   ├── integration/            # Integration tests
 │   ├── edge_cases/             # Edge case tests
-│   ├── api/                    # API endpoint tests
+│   ├── api/                    # API endpoint tests (content + bot)
 │   └── judge/                  # Live Claude tests
 │
 ├── requirements.txt            # Production dependencies
