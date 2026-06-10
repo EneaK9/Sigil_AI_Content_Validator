@@ -64,3 +64,10 @@ PLATFORM_PATTERNS = {
     "facebook": ["facebook.com/", "fb.com/", "fb.watch/"],
     "instagram": ["instagram.com/p/", "instagram.com/reel/"],
 }
+
+# API settings
+API_VERSION = "1.0.0"
+API_HOST = "0.0.0.0"
+API_PORT = 8000
+MAX_CONCURRENT_CHECKS = 10  # Parallel Claude API calls for batch processing
+JOB_EXPIRY_HOURS = 24       # Clean up completed jobs after this time

@@ -1,6 +1,6 @@
 # PolicyGuard
 
-**A comprehensive CLI tool for automated social media content policy compliance checking using Claude AI.**
+**A comprehensive CLI tool and REST API for automated social media content policy compliance checking using Claude AI.**
 
 PolicyGuard analyzes social media posts against platform-specific Community Guidelines and Terms of Service, returning detailed JSON verdicts that identify policy violations with precise explanations, severity levels, and actionable recommendations.
 
@@ -37,6 +37,12 @@ PolicyGuard analyzes social media posts against platform-specific Community Guid
   - [Batch Processing](#batch-processing)
   - [Advanced Options](#advanced-options)
   - [CLI Reference](#cli-reference)
+- [REST API](#rest-api)
+  - [Running the Server](#running-the-server)
+  - [API Endpoints](#api-endpoints)
+  - [Single Post Analysis](#single-post-analysis)
+  - [Batch Processing (Async)](#batch-processing-async)
+  - [API Examples](#api-examples)
 - [Output Format](#output-format)
 - [JSON Input Contract](#json-input-contract)
 - [Image Analysis](#image-analysis)
@@ -62,14 +68,27 @@ PolicyGuard analyzes social media posts against platform-specific Community Guid
 
 ## Features
 
+### Core Capabilities
 - **Multi-Platform Support**: Reddit, X/Twitter, TikTok, Facebook, and Instagram
 - **Automated Post Fetching**: Automatically scrapes post content from URLs (where supported)
 - **JSON Input**: Accept pre-extracted post data in JSON format (perfect for integration with data pipelines)
-- **Batch Processing**: Analyze multiple posts in a single command (array input → array of verdicts)
+- **Batch Processing**: Analyze multiple posts efficiently with parallel processing
 - **Image Analysis**: Automatically extracts and analyzes images using Claude's vision capabilities
 - **Video Transcription**: Extracts audio from videos and transcribes speech using OpenAI Whisper for policy analysis
 - **Pre-transcribed Audio**: Accept video transcripts directly in JSON input (bypasses Whisper API)
 - **Manual Text Input**: Analyze any text against any platform's policies
+
+### REST API (Microservice Mode)
+- **FastAPI-powered**: High-performance async REST API with automatic OpenAPI documentation
+- **Single Post Endpoint**: Synchronous analysis (~3-5 seconds) via `POST /api/v1/check`
+- **Async Batch Processing**: Submit large batches via `POST /api/v1/check/batch`, poll for results
+- **Job Tracking**: Monitor batch progress with `GET /api/v1/jobs/{job_id}`
+- **Policy Caching**: Policies loaded once per batch, not per request
+- **Parallel Execution**: Configurable concurrent Claude API calls (default: 10)
+- **CORS Enabled**: Ready for browser-based integrations
+- **No Authentication Required**: Public API by default (add auth as needed)
+
+### Output
 - **Detailed Verdicts**: Get comprehensive JSON output with:
   - Pass/Fail verdict
   - List of violations with severity levels (HIGH/MEDIUM/LOW)
@@ -77,40 +96,56 @@ PolicyGuard analyzes social media posts against platform-specific Community Guid
   - Specific policy references
   - Confidence scores
   - Actionable recommendations
+
+### Architecture
 - **Policy Caching**: Platform policies are cached locally for fast, offline-capable analysis
 - **Extensible Architecture**: Easy to add new platforms with the adapter pattern
 - **Robust Error Handling**: Clear, actionable error messages for every failure mode
-- **Comprehensive Test Suite**: 258 tests covering unit, integration, edge cases, and AI judgment quality
+- **Comprehensive Test Suite**: 306 tests covering unit, integration, edge cases, API endpoints, and AI judgment quality
 
 ---
 
 ## Architecture Overview
 
-PolicyGuard follows a modular architecture with clear separation of concerns:
+PolicyGuard follows a modular architecture with clear separation of concerns. The CLI and REST API share the same core business logic through a services layer:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
-│                              policyguard.py                                │
-│                           (CLI Entry Point)                                │
-└─────────────────────────────────┬──────────────────────────────────────────┘
-                                  │
-        ┌─────────────────────────┼─────────────────────────┐
-        │                         │                         │
-        ▼                         ▼                         ▼
-┌───────────────┐       ┌─────────────────┐       ┌─────────────────┐
-│    core/      │       │    adapters/    │       │    scrapers/    │
-│  detector.py  │       │   reddit.py     │       │ policy_scraper  │
-│   judge.py    │       │     x.py        │       │      .py        │
-│  models.py    │       │   tiktok.py     │       └─────────────────┘
-│policy_loader  │       │  facebook.py    │
-│     .py       │       │ instagram.py    │
-│image_fetcher  │       └─────────────────┘
+│                            Entry Points                                    │
+│  ┌─────────────────────────────┐    ┌─────────────────────────────────┐   │
+│  │      policyguard.py         │    │         server.py               │   │
+│  │      (CLI Interface)        │    │      (REST API - FastAPI)       │   │
+│  └──────────────┬──────────────┘    └────────────────┬────────────────┘   │
+└─────────────────┼────────────────────────────────────┼────────────────────┘
+                  │                                    │
+                  └─────────────────┬──────────────────┘
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│                           Services Layer                                   │
+│  ┌──────────────────┐  ┌────────────────────┐  ┌───────────────────────┐  │
+│  │  checker.py      │  │ batch_processor.py │  │    job_store.py       │  │
+│  │ (Policy caching  │  │ (Parallel exec,    │  │ (Job state tracking,  │  │
+│  │  single checks)  │  │  semaphore limit)  │  │  in-memory/Redis)     │  │
+│  └──────────────────┘  └────────────────────┘  └───────────────────────┘  │
+└─────────────────────────────────────┬──────────────────────────────────────┘
+                                      │
+        ┌─────────────────────────────┼─────────────────────────┐
+        │                             │                         │
+        ▼                             ▼                         ▼
+┌───────────────┐           ┌─────────────────┐       ┌─────────────────┐
+│    core/      │           │    adapters/    │       │    scrapers/    │
+│  detector.py  │           │   reddit.py     │       │ policy_scraper  │
+│   judge.py    │           │     x.py        │       │      .py        │
+│  models.py    │           │   tiktok.py     │       └─────────────────┘
+│policy_loader  │           │  facebook.py    │
+│     .py       │           │ instagram.py    │
+│image_fetcher  │           └─────────────────┘
 │     .py       │
 │video_transcr- │
 │   iber.py     │
 └───────────────┘
-        │                         │
-        │                         │
+        │                             │
+        │                             │
         ▼                         ▼
 ┌───────────────┐       ┌─────────────────┐
 │   policies/   │       │  External APIs  │
@@ -449,6 +484,240 @@ python policyguard.py show-policy reddit
 # Pipe to less for easier reading
 python policyguard.py show-policy reddit | less
 ```
+
+---
+
+## REST API
+
+PolicyGuard can run as a FastAPI microservice for integration with external systems, web applications, and data pipelines.
+
+### Running the Server
+
+```bash
+# Development mode (auto-reload)
+python server.py
+
+# Production mode (multiple workers)
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+The server starts on `http://localhost:8000`. Interactive API documentation is available at:
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/check` | Analyze a single post (synchronous, ~3-5s) |
+| `POST` | `/api/v1/check/batch` | Submit batch for async processing |
+| `GET` | `/api/v1/jobs/{job_id}` | Get batch job status and results |
+| `DELETE` | `/api/v1/jobs/{job_id}` | Delete a completed job |
+| `GET` | `/api/v1/health` | Health check for load balancers |
+
+### Single Post Analysis
+
+**Request:**
+```bash
+curl -X POST http://localhost:8000/api/v1/check \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://facebook.com/post/123",
+    "message": "Check out this amazing deal!",
+    "author.name": "John Doe",
+    "image.uri": "https://example.com/image.jpg"
+  }'
+```
+
+**Response:**
+```json
+{
+  "verdict": "PASS",
+  "platform": "facebook",
+  "post_url": "https://facebook.com/post/123",
+  "post_text": "Check out this amazing deal!",
+  "violations": [],
+  "passed_checks": ["hate speech", "violence", "spam"],
+  "confidence": 0.95,
+  "recommendation": "",
+  "checked_at": "2024-01-15T10:30:00+00:00"
+}
+```
+
+### Batch Processing (Async)
+
+For large batches (e.g., 1000 posts), use the async batch endpoint:
+
+**1. Submit Batch:**
+```bash
+curl -X POST http://localhost:8000/api/v1/check/batch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "posts": [
+      {"url": "https://facebook.com/post/1", "message": "First post"},
+      {"url": "https://facebook.com/post/2", "message": "Second post"},
+      {"url": "https://facebook.com/post/3", "message": "Third post"}
+    ]
+  }'
+```
+
+**Response:**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "total": 3,
+  "status": "pending"
+}
+```
+
+**2. Poll for Results:**
+```bash
+curl http://localhost:8000/api/v1/jobs/550e8400-e29b-41d4-a716-446655440000
+```
+
+**Response (in progress):**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "processing",
+  "progress": {
+    "completed": 150,
+    "total": 1000,
+    "failed": 2
+  },
+  "verdicts": [...],
+  "errors": [...],
+  "created_at": "2024-01-15T10:30:00+00:00",
+  "completed_at": null
+}
+```
+
+**Response (completed):**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "completed",
+  "progress": {
+    "completed": 1000,
+    "total": 1000,
+    "failed": 3
+  },
+  "verdicts": [
+    {"verdict": "PASS", "platform": "facebook", ...},
+    {"verdict": "FAIL", "platform": "facebook", ...},
+    ...
+  ],
+  "errors": [
+    {"index": 45, "url": "https://...", "error": "Policy not found"}
+  ],
+  "created_at": "2024-01-15T10:30:00+00:00",
+  "completed_at": "2024-01-15T10:35:00+00:00"
+}
+```
+
+### API Examples
+
+**Python (requests):**
+```python
+import requests
+
+# Single post
+response = requests.post(
+    "http://localhost:8000/api/v1/check",
+    json={
+        "url": "https://facebook.com/post/123",
+        "message": "Hello world!",
+        "author.name": "Test User"
+    }
+)
+verdict = response.json()
+print(f"Verdict: {verdict['verdict']}")
+
+# Batch processing
+batch_response = requests.post(
+    "http://localhost:8000/api/v1/check/batch",
+    json={"posts": posts_list}
+)
+job_id = batch_response.json()["job_id"]
+
+# Poll until complete
+import time
+while True:
+    status = requests.get(f"http://localhost:8000/api/v1/jobs/{job_id}").json()
+    if status["status"] == "completed":
+        break
+    print(f"Progress: {status['progress']['completed']}/{status['progress']['total']}")
+    time.sleep(5)
+```
+
+**JavaScript (fetch):**
+```javascript
+// Single post
+const response = await fetch('http://localhost:8000/api/v1/check', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    url: 'https://facebook.com/post/123',
+    message: 'Hello world!'
+  })
+});
+const verdict = await response.json();
+console.log(`Verdict: ${verdict.verdict}`);
+```
+
+### Batch Processing Efficiency
+
+The API optimizes batch processing with:
+
+1. **Policy Caching**: Policies are loaded once per batch, not per request
+2. **Parallel Execution**: Configurable concurrent Claude API calls (default: 10)
+3. **Platform Grouping**: Posts are grouped by platform to minimize policy reloads
+4. **Background Processing**: Batch jobs run asynchronously, freeing the client
+
+**Configuration** (in `config.py`):
+```python
+MAX_CONCURRENT_CHECKS = 10  # Parallel Claude API calls
+JOB_EXPIRY_HOURS = 24       # Auto-cleanup completed jobs
+```
+
+### Logging
+
+The API provides comprehensive logging to help you monitor request processing. Logs are output to stdout and include timestamps, log levels, and structured messages.
+
+**Sample log output:**
+```
+2024-01-15 10:30:00 | INFO     | policyguard.api | PolicyGuard API starting up...
+2024-01-15 10:30:00 | INFO     | policyguard.api | Version: 1.0.0
+2024-01-15 10:30:00 | INFO     | policyguard.api | Services initialized successfully
+
+# Single post check
+2024-01-15 10:30:01 | INFO     | policyguard.api.check | [CHECK] Received single post check request
+2024-01-15 10:30:01 | INFO     | policyguard.api.check | [CHECK] URL: https://facebook.com/post/123
+2024-01-15 10:30:01 | INFO     | policyguard.api.check | [CHECK] Platform detected: facebook
+2024-01-15 10:30:01 | INFO     | policyguard.api.check | [CHECK] Starting Claude analysis for facebook...
+2024-01-15 10:30:05 | INFO     | policyguard.api.check | [CHECK] Analysis complete: PASS (confidence: 0.95)
+2024-01-15 10:30:05 | INFO     | policyguard.api.check | [CHECK] Request completed in 4.23s
+
+# Batch processing
+2024-01-15 10:31:00 | INFO     | policyguard.api.check | [BATCH] Received batch request with 100 posts
+2024-01-15 10:31:00 | INFO     | policyguard.api.check | [BATCH] Platform distribution:
+2024-01-15 10:31:00 | INFO     | policyguard.api.check | [BATCH]   - facebook: 80 posts
+2024-01-15 10:31:00 | INFO     | policyguard.api.check | [BATCH]   - instagram: 20 posts
+2024-01-15 10:31:00 | INFO     | policyguard.services.batch | [JOB a1b2c3d4] ========== BATCH PROCESSING STARTED ==========
+2024-01-15 10:31:00 | INFO     | policyguard.services.batch | [JOB a1b2c3d4] Total posts: 100
+2024-01-15 10:31:00 | INFO     | policyguard.services.batch | [JOB a1b2c3d4] Pre-loading policies for 2 platform(s)...
+2024-01-15 10:31:05 | INFO     | policyguard.services.batch | [JOB a1b2c3d4] Progress: 10/100 (10.0%) | PASS: 8 | FAIL: 2 | Rate: 2.0/s | ETA: 45s
+2024-01-15 10:31:50 | INFO     | policyguard.services.batch | [JOB a1b2c3d4] ========== BATCH COMPLETED ==========
+2024-01-15 10:31:50 | INFO     | policyguard.services.batch | [JOB a1b2c3d4] Final results: 95 PASS, 5 FAIL, 0 errors in 50.2s
+```
+
+**Log categories:**
+- `policyguard.api` - Application startup/shutdown
+- `policyguard.api.check` - Single and batch check requests
+- `policyguard.api.jobs` - Job status queries
+- `policyguard.services.batch` - Batch processing progress
+- `policyguard.services.checker` - Policy loading
+- `policyguard.services.jobstore` - Job state changes
 
 ---
 
@@ -1472,9 +1741,30 @@ python policyguard.py check "https://newplatform.com/post/abc123"
 ```
 policyguard/
 │
-├── policyguard.py              # CLI entry point (only file users run)
+├── policyguard.py              # CLI entry point
+├── server.py                   # REST API entry point (uvicorn)
 │
 ├── config.py                   # All configuration constants
+│
+├── api/                        # REST API (FastAPI)
+│   ├── __init__.py
+│   ├── main.py                 # FastAPI app, CORS, lifespan
+│   ├── dependencies.py         # Shared service instances
+│   ├── routes/                 # API endpoint handlers
+│   │   ├── __init__.py
+│   │   ├── check.py            # POST /check, POST /check/batch
+│   │   ├── jobs.py             # GET/DELETE /jobs/{id}
+│   │   └── health.py           # GET /health
+│   └── schemas/                # Pydantic request/response models
+│       ├── __init__.py
+│       ├── requests.py         # PostInput, BatchInput
+│       └── responses.py        # VerdictResponse, JobResponse, etc.
+│
+├── services/                   # Business logic orchestration
+│   ├── __init__.py
+│   ├── checker.py              # Single post checking + policy cache
+│   ├── batch_processor.py      # Parallel batch processing
+│   └── job_store.py            # Job state management (in-memory)
 │
 ├── core/                       # Core business logic
 │   ├── __init__.py
@@ -1514,11 +1804,12 @@ policyguard/
 ├── debug/                      # Debug output
 │   └── last_response.txt       # Saved when Claude returns invalid JSON
 │
-├── tests/                      # Test suite
+├── tests/                      # Test suite (306 tests)
 │   ├── conftest.py             # Shared fixtures
 │   ├── unit/                   # Unit tests
 │   ├── integration/            # Integration tests
 │   ├── edge_cases/             # Edge case tests
+│   ├── api/                    # API endpoint tests
 │   └── judge/                  # Live Claude tests
 │
 ├── requirements.txt            # Production dependencies
