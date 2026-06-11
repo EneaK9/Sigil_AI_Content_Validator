@@ -86,15 +86,19 @@ async def validate_posts(request: ValidateRequest) -> ValidateResponse:
     through the Claude-based policy compliance judge, and stores the results.
     
     - **campaign_id**: Optional UUID to filter by campaign
-    - **platform**: Optional platform filter (tiktok, instagram, facebook)
+    - **platform**: Optional platform filter (tiktok, instagram, facebook, twitter)
     - **limit**: Maximum number of posts to validate (default: 100)
     """
     campaign_id = UUID(request.campaign_id) if request.campaign_id else None
     
-    if request.platform and request.platform not in ["tiktok", "instagram", "facebook"]:
+    valid_platforms = ["tiktok", "instagram", "facebook", "twitter"]
+    if request.platform and request.platform not in valid_platforms:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid platform: {request.platform}. Must be tiktok, instagram, or facebook."
+            detail=(
+                f"Invalid platform: {request.platform}. "
+                f"Must be one of: {', '.join(valid_platforms)}."
+            ),
         )
     
     results = await validate_scraped_posts(
@@ -127,14 +131,18 @@ async def get_violations(
     
     Returns posts grouped with their violation details.
     
-    - **platform**: Optional filter (tiktok, instagram, facebook)
+    - **platform**: Optional filter (tiktok, instagram, facebook, twitter)
     - **severity**: Optional severity filter (HIGH, MEDIUM, LOW)
     - **limit**: Maximum results to return (default: 100)
     """
-    if platform and platform not in ["tiktok", "instagram", "facebook"]:
+    valid_platforms = ["tiktok", "instagram", "facebook", "twitter"]
+    if platform and platform not in valid_platforms:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid platform: {platform}. Must be tiktok, instagram, or facebook."
+            detail=(
+                f"Invalid platform: {platform}. "
+                f"Must be one of: {', '.join(valid_platforms)}."
+            ),
         )
     
     if severity and severity not in ["HIGH", "MEDIUM", "LOW"]:

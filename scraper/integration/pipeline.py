@@ -47,7 +47,7 @@ async def fetch_pending_posts(
     
     Args:
         campaign_id: Optional filter by campaign
-        platform: Optional filter by platform (tiktok, instagram, facebook)
+        platform: Optional filter by platform (tiktok, instagram, facebook, twitter)
         limit: Maximum number of posts to fetch
         
     Returns:

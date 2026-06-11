@@ -11,38 +11,52 @@ from typing import Optional, Union
 import anthropic
 
 from config import CLAUDE_MODEL, CLAUDE_MAX_TOKENS, DEBUG_DIR, PREFERRED_MAX_IMAGES
-from core.models import PostData, Violation, Verdict, JudgmentError, ScrapingError
+from core.models import PostData, Violation, Warning, Verdict, JudgmentError, ScrapingError
 from core.image_fetcher import fetch_image_as_base64
 from core.video_transcriber import transcribe_video
 
 
-SYSTEM_PROMPT = """You are a precise, impartial social media policy compliance analyst.
+SYSTEM_PROMPT = """You are an aggressive content auditor. Your job is to find problems.
 
-Your job is to determine whether a given post violates the platform's
-Community Guidelines or Terms of Service.
+## YOUR MINDSET
+- Assume the worst possible interpretation of any content
+- If something COULD be problematic, it IS worth flagging
+- Consider how the most sensitive possible audience would react
+- Look for hidden meanings, dog whistles, coded language, historical context
+- If you have to think twice about whether something is okay, it's not okay — flag it
+- Better to over-flag than to miss something
+- Intent doesn't matter. Impact does. Even accidental harm is harm.
 
-Rules you must follow:
-1. Only flag genuine violations. Do not flag things that are merely
-   controversial, edgy, or offensive but do not violate written policy.
-2. Always quote the specific phrase from the post that triggered the violation.
-3. Always cite the exact policy section or rule name, not a vague description.
-4. Your confidence score must reflect genuine uncertainty — if the post is
-   clearly fine, return 0.95+. If it is borderline, return 0.5-0.75.
-5. Return ONLY raw JSON. No markdown fences. No explanation. No preamble.
+## WHAT YOU'RE LOOKING FOR
+- Racism (overt, subtle, systemic, coded, historical, microaggressions)
+- Antisemitism (tropes, dog whistles, conspiracy-adjacent language, "elites" rhetoric)
+- Islamophobia, xenophobia, any form of ethnic/religious prejudice
+- Sexism, misogyny, toxic masculinity
+- Homophobia, transphobia, any LGBTQ+ hostility
+- Ableism (using "crazy", "insane", "lame" as pejoratives)
+- Classism, ageism
+- Cultural appropriation, insensitivity, erasure
+- Harmful stereotypes, even "positive" ones
+- Microaggressions, tone policing, gaslighting
+- Power imbalances, punching down
+- Anything that could make any marginalized group uncomfortable
+
+## THREE VERDICTS
+- CLEAR_VIOLATION: Content clearly violates platform policies
+- POSSIBLE_VIOLATION: You found SOMETHING problematic but it's not a clear policy violation
+- PASS: Genuinely clean (this should be rare — most content has something if you look)
+
+## RULES
+1. Return ONLY raw JSON. No markdown fences. No explanation. No preamble.
    The first character of your response must be '{' and the last must be '}'.
-6. If images are provided, analyze them with the same rigor as the text.
-   Violations found in images are just as serious as violations in text.
-   In the "quote" field for image violations, describe what you saw instead
-   of quoting text, e.g.: "[Image 1: hate symbol displayed prominently in center of image]".
-7. If a video transcript is provided, analyze it with the same rigor as the post text.
-   Violations found in transcripts are just as serious as violations in text.
-   In the "quote" field for transcript violations, include the relevant excerpt and label it,
-   e.g.: "[Video transcript: 'exact words spoken here']".
-8. ACCOUNT AUTHENTICITY: If an [Account Analysis] block is present, factor the bot verdict
-   into your moderation decision. A BOT verdict does not change whether content violates
-   policy — violations are violations regardless. However, BOT accounts coordinating to
-   spread violating content should be noted as higher risk due to amplification potential.
-   Note the bot verdict in your explanation when relevant."""
+2. For violations, quote the specific phrase and cite the exact policy section.
+3. For warnings, explain what's problematic and why it matters.
+4. When in doubt, flag it as POSSIBLE_VIOLATION. Over-flagging is better than under-flagging.
+5. "It was a joke" is not a defense. Flag it anyway.
+6. A post can have both violations AND warnings — list everything you find.
+7. If images are provided, analyze them with the same aggressive scrutiny.
+8. If a video transcript is provided, analyze it with the same aggressive scrutiny.
+9. If an [Account Analysis] block is present showing BOT verdict, note this amplifies risk."""
 
 
 def build_bot_context(post: PostData) -> str:
@@ -106,18 +120,35 @@ PLATFORM POLICIES (Community Guidelines + Terms of Service):
 {policies_text}
 ---
 
-Analyze the post against the policies above and return a JSON object with
-this exact structure:
+YOUR MISSION: Find problems. Look for any angle.
+
+Analyze this content aggressively. Consider:
+- How could this hurt someone from a marginalized group?
+- What's the worst interpretation of this content?
+- Is there historical/cultural context that makes this problematic?
+- Even if the intent seems good, what's the impact?
+
+Return a JSON object with this exact structure:
 
 {{
-  "verdict": "PASS" or "FAIL",
+  "verdict": "PASS" | "POSSIBLE_VIOLATION" | "CLEAR_VIOLATION",
   "violations": [
     {{
       "rule": "exact rule name from the policy",
       "severity": "HIGH" | "MEDIUM" | "LOW",
-      "explanation": "plain English explanation of why this is a violation",
+      "explanation": "why this is a clear violation",
       "policy_reference": "exact section name from the policy document",
       "quote": "verbatim phrase from the post that violates this rule"
+    }}
+  ],
+  "warnings": [
+    {{
+      "category": "type of issue (racism, sexism, antisemitism, microaggression, etc.)",
+      "risk_level": "OBVIOUS" | "INTERPRETIVE" | "DEEP_READ",
+      "explanation": "what's wrong with this — be detailed",
+      "problematic_element": "exact phrase or element that's problematic",
+      "affected_groups": ["who could be harmed or offended"],
+      "why_it_matters": "educational context — why this matters even if subtle"
     }}
   ],
   "passed_checks": ["list of policy categories that were checked and passed"],
@@ -125,7 +156,11 @@ this exact structure:
   "recommendation": "what should be changed or removed, empty string if PASS"
 }}
 
-If the post passes all policies, violations must be an empty array []."""
+Rules:
+- If violations is non-empty → verdict must be "CLEAR_VIOLATION"
+- If violations is empty but warnings is non-empty → verdict must be "POSSIBLE_VIOLATION"
+- If both empty → verdict is "PASS" (but look harder — PASS should be rare)
+- When in doubt, flag it. Over-flagging is better than missing something."""
     
     return prompt + transcript_text
 
@@ -244,7 +279,7 @@ def build_verdict(post: PostData, data: dict) -> Verdict:
     Raises:
         JudgmentError: If response is missing required fields
     """
-    required_fields = ["verdict", "violations", "passed_checks", "confidence", "recommendation"]
+    required_fields = ["verdict", "violations", "warnings", "passed_checks", "confidence", "recommendation"]
     missing = [f for f in required_fields if f not in data]
     if missing:
         raise JudgmentError(
@@ -268,6 +303,23 @@ def build_verdict(post: PostData, data: dict) -> Verdict:
                 f"Invalid violation data from Claude: {e}"
             )
     
+    # Parse warnings
+    warnings: list[Warning] = []
+    for w in data["warnings"]:
+        try:
+            warnings.append(Warning(
+                category=w.get("category", "Unknown"),
+                risk_level=w.get("risk_level", "INTERPRETIVE"),
+                explanation=w.get("explanation", ""),
+                problematic_element=w.get("problematic_element", ""),
+                affected_groups=w.get("affected_groups", []),
+                why_it_matters=w.get("why_it_matters", "")
+            ))
+        except ValueError as e:
+            raise JudgmentError(
+                f"Invalid warning data from Claude: {e}"
+            )
+    
     try:
         verdict = Verdict(
             verdict=data["verdict"],
@@ -275,6 +327,7 @@ def build_verdict(post: PostData, data: dict) -> Verdict:
             post_url=post.url,
             post_text=post.text,
             violations=violations,
+            warnings=warnings,
             passed_checks=data["passed_checks"],
             confidence=float(data["confidence"]),
             recommendation=data.get("recommendation", ""),

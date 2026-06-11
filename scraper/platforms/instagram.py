@@ -10,6 +10,7 @@ page in the Apify console before relying on a new field.
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
 from typing import Any
 
 from scraper.config import get_settings
@@ -39,7 +40,10 @@ class InstagramScraper(PlatformScraper):
             s = seed.strip()
             if not s:
                 continue
-            if s.startswith("http://") or s.startswith("https://"):
+            tag_from_url = _instagram_tag_from_url(s)
+            if tag_from_url:
+                hashtags.append(tag_from_url)
+            elif s.startswith("http://") or s.startswith("https://"):
                 direct_urls.append(s)
             else:
                 hashtags.append(s.lstrip("#"))
@@ -66,6 +70,12 @@ class InstagramScraper(PlatformScraper):
 
         short_code = as_str(first(raw_item, "shortCode", "shortcode"))
         text = as_str(first(raw_item, "caption", "text"))
+        url = as_str(raw_item.get("url")) or (
+            f"https://www.instagram.com/p/{short_code}/" if short_code else None
+        )
+        if url and "/explore/tags/" in url:
+            return None
+
         product_type = as_str(first(raw_item, "type", "productType")) or ""
         is_video = bool(
             raw_item.get("isVideo")
@@ -87,8 +97,7 @@ class InstagramScraper(PlatformScraper):
         return NormalizedPost(
             platform=Platform.instagram,
             platform_post_id=post_id,
-            url=as_str(raw_item.get("url"))
-            or (f"https://www.instagram.com/p/{short_code}/" if short_code else None),
+            url=url,
             author_handle=handle,
             author_id=as_str(first(raw_item, "ownerId", "ownerFbid")),
             author_url=f"https://www.instagram.com/{handle}/" if handle else None,
@@ -110,3 +119,13 @@ class InstagramScraper(PlatformScraper):
             campaign_id=campaign.id,
             raw=raw_item,
         )
+
+
+def _instagram_tag_from_url(seed: str) -> str | None:
+    if not (seed.startswith("http://") or seed.startswith("https://")):
+        return None
+    parsed = urlparse(seed)
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) >= 3 and parts[0] == "explore" and parts[1] == "tags":
+        return parts[2].lstrip("#")
+    return None

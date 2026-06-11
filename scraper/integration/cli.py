@@ -206,7 +206,7 @@ def main() -> int:
     )
     validate_parser.add_argument(
         "--platform",
-        choices=["tiktok", "instagram", "facebook"],
+        choices=["tiktok", "instagram", "facebook", "twitter"],
         help="Filter by platform",
     )
     validate_parser.add_argument(
@@ -226,7 +226,7 @@ def main() -> int:
     )
     report_parser.add_argument(
         "--platform",
-        choices=["tiktok", "instagram", "facebook"],
+        choices=["tiktok", "instagram", "facebook", "twitter"],
         help="Filter by platform",
     )
     report_parser.add_argument(

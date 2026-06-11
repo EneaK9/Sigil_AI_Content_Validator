@@ -169,7 +169,7 @@ async def run_bulk_scrape(
     """Run bulk scrapes for all enabled campaigns.
     
     Args:
-        platform_filter: Optional platform to filter (tiktok, instagram, facebook)
+        platform_filter: Optional platform to filter (tiktok, instagram, facebook, twitter)
         results_limit: Maximum results per campaign (default: 2000)
         
     Returns:
@@ -240,7 +240,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--platform",
-        choices=["tiktok", "instagram", "facebook"],
+        choices=["tiktok", "instagram", "facebook", "twitter"],
         help="Filter by platform (run all if not specified)",
     )
     parser.add_argument(

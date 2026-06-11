@@ -12,6 +12,7 @@ Output:
     - tiktok_albania_political_YYYYMMDD_HHMMSS.json
     - instagram_albania_political_YYYYMMDD_HHMMSS.json
     - facebook_albania_political_YYYYMMDD_HHMMSS.json
+    - twitter_albania_political_YYYYMMDD_HHMMSS.json
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from scraper.config import get_settings, load_campaigns
 from scraper.logging_setup import configure_logging, get_logger
 from scraper.models import Campaign, Platform
 from scraper.platforms.base import get_scraper
+from scraper.relevance import filter_and_dedupe_posts
 
 import scraper.platforms  # noqa: F401 - register adapters
 
@@ -69,6 +71,7 @@ async def run_single_campaign(
     apify: ApifyService,
     campaign: Campaign,
     results_limit: int,
+    relevance_filter: bool,
 ) -> dict[str, Any]:
     """Run a single campaign and return results summary."""
     settings = get_settings()
@@ -159,6 +162,21 @@ async def run_single_campaign(
                 failed_count += 1
                 if failed_count <= 5:
                     log.warning("normalize_failed", error=str(e))
+
+        filter_stats = {
+            "input_count": len(posts),
+            "irrelevant_count": 0,
+            "duplicate_count": 0,
+            "kept_count": len(posts),
+        }
+        if relevance_filter:
+            posts, filter_stats = filter_and_dedupe_posts(posts)
+            print(
+                "Relevance/dedupe filter: "
+                f"{filter_stats['kept_count']} kept, "
+                f"{filter_stats['irrelevant_count']} irrelevant, "
+                f"{filter_stats['duplicate_count']} duplicates"
+            )
         
         filepath = save_results(
             platform=campaign.platform.value,
@@ -171,8 +189,10 @@ async def run_single_campaign(
                 "apify_dataset_id": info.dataset_id,
                 "cost_usd": status_info.cost_usd,
                 "raw_items_count": len(raw_items),
-                "normalized_count": len(posts),
+                "normalized_count": filter_stats["input_count"],
+                "saved_count": len(posts),
                 "failed_count": failed_count,
+                **filter_stats,
             },
         )
         
@@ -203,11 +223,12 @@ async def run_single_campaign(
 async def run_bulk_scrape(
     platform_filter: str | None = None,
     results_limit: int = 2000,
+    relevance_filter: bool = True,
 ) -> list[dict[str, Any]]:
     """Run bulk scrapes for all enabled campaigns.
     
     Args:
-        platform_filter: Optional platform to filter (tiktok, instagram, facebook)
+        platform_filter: Optional platform to filter (tiktok, instagram, facebook, twitter)
         results_limit: Maximum results per campaign (default: 2000)
         
     Returns:
@@ -236,13 +257,19 @@ async def run_bulk_scrape(
     print(f"# {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"# Campaigns: {len(enabled_campaigns)}")
     print(f"# Results limit per campaign: {results_limit}")
+    print(f"# Relevance filter: {'on' if relevance_filter else 'off'}")
     print(f"# Output directory: {RESULTS_DIR}")
     print(f"{'#'*60}")
     
     results = []
     
     for campaign in enabled_campaigns:
-        result = await run_single_campaign(apify, campaign, results_limit)
+        result = await run_single_campaign(
+            apify,
+            campaign,
+            results_limit,
+            relevance_filter=relevance_filter,
+        )
         results.append(result)
     
     print(f"\n{'='*60}")
@@ -279,7 +306,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--platform",
-        choices=["tiktok", "instagram", "facebook"],
+        choices=["tiktok", "instagram", "facebook", "twitter"],
         help="Filter by platform (run all if not specified)",
     )
     parser.add_argument(
@@ -287,6 +314,11 @@ def main() -> int:
         type=int,
         default=2000,
         help="Maximum results per campaign (default: 2000)",
+    )
+    parser.add_argument(
+        "--no-relevance-filter",
+        action="store_true",
+        help="Save all normalized posts without Albania/Kushner/Trump filtering",
     )
     
     args = parser.parse_args()
@@ -306,6 +338,7 @@ def main() -> int:
         results = asyncio.run(run_bulk_scrape(
             platform_filter=args.platform,
             results_limit=args.limit,
+            relevance_filter=not args.no_relevance_filter,
         ))
         
         failed = [r for r in results if r["status"] != "success"]

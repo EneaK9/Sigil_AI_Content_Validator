@@ -15,17 +15,29 @@ class ViolationResponse(BaseModel):
     quote: str = Field(..., description="Text/description that triggered the violation")
 
 
+class WarningResponse(BaseModel):
+    """A possible violation or risk flag found in a post."""
+    category: str = Field(..., description="Type of issue (racism, sexism, antisemitism, microaggression, etc.)")
+    risk_level: Literal["OBVIOUS", "INTERPRETIVE", "DEEP_READ"] = Field(..., description="How obvious the issue is")
+    explanation: str = Field(..., description="What's wrong with this — detailed explanation")
+    problematic_element: str = Field(..., description="Exact phrase or element that's problematic")
+    affected_groups: List[str] = Field(default_factory=list, description="Who could be harmed or offended")
+    why_it_matters: str = Field("", description="Educational context — why this matters even if subtle")
+
+
 class VerdictResponse(BaseModel):
     """Complete judgment result for a post."""
-    verdict: Literal["PASS", "FAIL"] = Field(..., description="Pass if no violations, Fail otherwise")
+    verdict: Literal["PASS", "POSSIBLE_VIOLATION", "CLEAR_VIOLATION"] = Field(..., description="PASS if clean, POSSIBLE_VIOLATION if flagged, CLEAR_VIOLATION if violated")
     platform: str = Field(..., description="Platform the post was analyzed against")
     post_url: str = Field(..., description="Original URL or 'manual-input'")
     post_text: str = Field(..., description="Full text that was analyzed")
-    violations: List[ViolationResponse] = Field(default_factory=list, description="List of violations")
+    violations: List[ViolationResponse] = Field(default_factory=list, description="List of clear violations")
+    warnings: List[WarningResponse] = Field(default_factory=list, description="List of possible violations/flags")
     passed_checks: List[str] = Field(default_factory=list, description="Policy categories that passed")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score 0.0-1.0")
     recommendation: str = Field("", description="Suggested fix (empty if PASS)")
     checked_at: str = Field(..., description="ISO 8601 timestamp of analysis")
+    report_message: str = Field("", description="Pre-formatted message for reporting to platform (empty if PASS)")
 
 
 class JobProgress(BaseModel):

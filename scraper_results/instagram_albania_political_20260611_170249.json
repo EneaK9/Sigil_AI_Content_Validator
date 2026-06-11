@@ -1,0 +1,33 @@
+{
+  "metadata": {
+    "platform": "instagram",
+    "topic": "albania_political",
+    "scraped_at": "2026-06-11T17:02:49.362404+00:00",
+    "total_posts": 0,
+    "seeds": [
+      "#jaredkushner",
+      "#kushner",
+      "#ivankatrump",
+      "#sazan",
+      "#edirama",
+      "#protesta",
+      "https://www.instagram.com/topchannelalb/",
+      "https://www.instagram.com/tvklan.al/",
+      "https://www.instagram.com/a2cnn/",
+      "https://www.instagram.com/euronews.al/"
+    ],
+    "country": "AL",
+    "apify_run_id": "2aaMukh2TWvuoOnVr",
+    "apify_dataset_id": "ejrkI42Yc1T3093e7",
+    "cost_usd": 0.1219,
+    "raw_items_count": 53,
+    "normalized_count": 50,
+    "saved_count": 0,
+    "failed_count": 0,
+    "input_count": 50,
+    "irrelevant_count": 50,
+    "duplicate_count": 0,
+    "kept_count": 0
+  },
+  "posts": []
+}

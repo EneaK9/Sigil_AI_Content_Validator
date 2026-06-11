@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 _HASHTAG_RE = re.compile(r"#(\w+)", re.UNICODE)
@@ -68,7 +69,10 @@ def parse_datetime(value: Any) -> datetime | None:
         try:
             dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         except ValueError:
-            return None
+            try:
+                dt = parsedate_to_datetime(raw)
+            except (TypeError, ValueError):
+                return None
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)

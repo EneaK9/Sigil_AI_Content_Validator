@@ -1,0 +1,6 @@
+platform,verdict,confidence,violations_count,warnings_count,warning_categories,author,content_text,url
+instagram,PASS,0.95,0,0,,,,https://www.instagram.com/explore/tags/albania
+instagram,PASS,1.0,0,0,,,,https://www.instagram.com/explore/tags/edirama
+instagram,PASS,1.0,0,0,,,,https://www.instagram.com/explore/tags/politika
+instagram,PASS,0.95,0,0,,,,https://www.instagram.com/explore/tags/protesta
+instagram,PASS,0.95,0,0,,,,https://www.instagram.com/explore/tags/tirane

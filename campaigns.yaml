@@ -3,39 +3,68 @@
 # Location: Albania
 
 campaigns:
-  # TikTok campaign (DISABLED - already scraped 3339 posts)
+  # TikTok campaign - compound story queries only
   - platform: tiktok
     topic: albania_political
     country: AL
     seeds:
-      - "Protesta"
-      - "Kushner"
-      - "Trump"
-      - "Edi Rama"
+      - "Jared Kushner Albania protest"
+      - "Kushner Sazan Albania"
+      - "Trump Kushner Albania resort"
+      - "Ivanka Trump Albania resort"
+      - "Edi Rama Kushner Sazan"
+      - "Albania protest Kushner resort"
+      - "Sazan Island Kushner protest"
+      - "Kushner Shqiperi protesta"
     daily_target: 1000
-    enabled: false
+    enabled: true
 
-  # Instagram campaign (DISABLED - already scraped 1006 posts)
+  # Instagram campaign - hashtags/profiles only; relevance filter removes broad hits
   - platform: instagram
     topic: albania_political
     country: AL
     seeds:
-      - "https://www.instagram.com/explore/tags/protesta/"
-      - "https://www.instagram.com/explore/tags/shqiperia/"
-      - "https://www.instagram.com/explore/tags/albania/"
+      - "#jaredkushner"
+      - "#kushner"
+      - "#ivankatrump"
+      - "#sazan"
+      - "#edirama"
+      - "#protesta"
+      - "https://www.instagram.com/topchannelalb/"
+      - "https://www.instagram.com/tvklan.al/"
+      - "https://www.instagram.com/a2cnn/"
+      - "https://www.instagram.com/euronews.al/"
     daily_target: 1000
-    enabled: false
+    enabled: true
 
-  # Facebook campaign - Using SEARCH KEYWORDS with the new scraper
+  # Facebook campaign - compound story queries only
   - platform: facebook
     topic: albania_political
     country: AL
     seeds:
-      - "Protesta"
-      - "Kushner"
-      - "Trump"
-      - "Edi Rama"
-      - "Albania"
-      - "Shqiperia"
+      - "Jared Kushner Albania protest"
+      - "Kushner Sazan Albania"
+      - "Trump Kushner Albania resort"
+      - "Ivanka Trump Albania resort"
+      - "Edi Rama Kushner Sazan"
+      - "Albania protest Kushner resort"
+      - "Sazan Island Kushner protest"
+      - "Kushner Shqiperi protesta"
+    daily_target: 1000
+    enabled: true
+
+  # Twitter/X campaign - compound story queries only
+  - platform: twitter
+    topic: albania_political
+    country: AL
+    seeds:
+      - "Jared Kushner Albania protest"
+      - "Kushner Sazan Albania"
+      - "Trump Kushner Albania resort"
+      - "Ivanka Trump Albania resort"
+      - "Edi Rama Kushner Sazan"
+      - "Albania protest Kushner resort"
+      - "Sazan Island Kushner protest"
+      - "Kushner Shqiperi protesta"
     daily_target: 1000
     enabled: true
