@@ -1,0 +1,41 @@
+# Sigil Scraper Campaigns - Albania Political Content
+# Keywords: Protesta, Kushner, Trump, Edi Rama
+# Location: Albania
+
+campaigns:
+  # TikTok campaign (DISABLED - already scraped 3339 posts)
+  - platform: tiktok
+    topic: albania_political
+    country: AL
+    seeds:
+      - "Protesta"
+      - "Kushner"
+      - "Trump"
+      - "Edi Rama"
+    daily_target: 1000
+    enabled: false
+
+  # Instagram campaign (DISABLED - already scraped 1006 posts)
+  - platform: instagram
+    topic: albania_political
+    country: AL
+    seeds:
+      - "https://www.instagram.com/explore/tags/protesta/"
+      - "https://www.instagram.com/explore/tags/shqiperia/"
+      - "https://www.instagram.com/explore/tags/albania/"
+    daily_target: 1000
+    enabled: false
+
+  # Facebook campaign - Using SEARCH KEYWORDS with the new scraper
+  - platform: facebook
+    topic: albania_political
+    country: AL
+    seeds:
+      - "Protesta"
+      - "Kushner"
+      - "Trump"
+      - "Edi Rama"
+      - "Albania"
+      - "Shqiperia"
+    daily_target: 1000
+    enabled: true

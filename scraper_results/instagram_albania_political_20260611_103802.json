@@ -1,0 +1,27 @@
+{
+  "metadata": {
+    "platform": "instagram",
+    "topic": "albania_political",
+    "scraped_at": "2026-06-11T10:38:02.888687+00:00",
+    "total_posts": 0,
+    "seeds": [
+      "#protesta",
+      "#kushner",
+      "#trump",
+      "#edirama",
+      "#albania",
+      "#shqiperia",
+      "#tirane",
+      "Protesta Albania",
+      "Edi Rama"
+    ],
+    "country": "AL",
+    "apify_run_id": "7ftmydYwikwI7VoEW",
+    "apify_dataset_id": "Ch3BJ9JZg7F4DOPF9",
+    "cost_usd": 0.0023,
+    "raw_items_count": 1,
+    "normalized_count": 0,
+    "failed_count": 0
+  },
+  "posts": []
+}
