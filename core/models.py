@@ -49,7 +49,7 @@ class PostData:
 
     def __post_init__(self) -> None:
         """Validate that platform is supported."""
-        valid_platforms = ["reddit", "x", "tiktok", "facebook", "instagram"]
+        valid_platforms = ["reddit", "x", "tiktok", "facebook", "instagram", "linkedin"]
         if self.platform not in valid_platforms:
             raise ValueError(
                 f"Invalid platform '{self.platform}'. "
@@ -85,6 +85,10 @@ class Warning:
     problematic_element: str   # Exact phrase, image description, or element flagged
     affected_groups: list[str] = field(default_factory=list)  # Who could be harmed or offended
     why_it_matters: str = ""   # Educational context — why this matters even if subtle
+    rule: str = ""             # Policy rule or guideline the warning approaches/breaks
+    severity: str = "LOW"      # Severity for unified reporting
+    policy_reference: str = "" # Exact ToS / Community Guidelines section
+    quote: str = ""            # Verbatim phrase or content element
 
     def __post_init__(self) -> None:
         """Validate risk level."""
@@ -93,6 +97,12 @@ class Warning:
             raise ValueError(
                 f"Invalid risk_level '{self.risk_level}'. "
                 f"Must be one of: {', '.join(valid_risk_levels)}"
+            )
+        valid_severities = ["HIGH", "MEDIUM", "LOW"]
+        if self.severity not in valid_severities:
+            raise ValueError(
+                f"Invalid severity '{self.severity}'. "
+                f"Must be one of: {', '.join(valid_severities)}"
             )
 
 
@@ -141,7 +151,8 @@ class Verdict:
             "x": "X (Twitter)",
             "tiktok": "TikTok",
             "facebook": "Facebook",
-            "instagram": "Instagram"
+            "instagram": "Instagram",
+            "linkedin": "LinkedIn"
         }
         return names.get(self.platform, self.platform.title())
 
@@ -202,8 +213,10 @@ class Verdict:
             for w in self.warnings:
                 affected = ", ".join(w.affected_groups) if w.affected_groups else "various communities"
                 lines.extend([
-                    f"- {w.category} ({w.risk_level})",
-                    f'  Element: "{w.problematic_element}"',
+                    f"- {w.category} ({w.risk_level}, Severity: {w.severity})",
+                    f"  Rule: {w.rule or 'Potential policy concern'}",
+                    f"  Policy Reference: {w.policy_reference or 'Relevant community guidelines / terms'}",
+                    f'  Element: "{w.quote or w.problematic_element}"',
                     f"  Impact: {w.explanation}",
                     f"  Affected Communities: {affected}",
                     ""
@@ -226,22 +239,22 @@ class Verdict:
         return "\n".join(lines)
 
     def _generate_warning_report(self, platform_name: str, confidence_pct: int) -> str:
-        """Generate report for possible violations (warnings only)."""
+        """Generate report for warning-level findings treated as violations."""
         lines = [
-            f"Subject: Content Review Request - Potential Policy Concern on {platform_name}",
+            f"Subject: Content Violation Report - {platform_name} Community Guidelines",
             "",
             f"To: {platform_name} Trust & Safety Team",
             "",
-            "I am flagging content for your review that may approach your Community Guidelines thresholds.",
+            f"I am reporting content that violates or materially breaches {platform_name}'s Community Guidelines and/or Terms of Service.",
             "",
             "POST DETAILS:",
             f"- URL: {self.post_url}",
             f"- Date Analyzed: {self.checked_at}",
             "",
             "ASSESSMENT:",
-            f"This content does not clearly violate your stated policies, but contains elements that warrant review. Confidence: {confidence_pct}%.",
+            f"This content contains reportable policy violations with {confidence_pct}% confidence.",
             "",
-            "IDENTIFIED CONCERNS:",
+            "SPECIFIC VIOLATIONS:",
             ""
         ]
         
@@ -250,8 +263,11 @@ class Verdict:
             lines.extend([
                 f"{i}. {w.category}",
                 f"   Risk Level: {w.risk_level}",
+                f"   Severity: {w.severity}",
+                f"   Rule: {w.rule or 'Potential policy concern'}",
+                f"   Policy Reference: {w.policy_reference or 'Relevant community guidelines / terms'}",
                 "",
-                f'   Problematic Element: "{w.problematic_element}"',
+                f'   Problematic Element: "{w.quote or w.problematic_element}"',
                 "",
                 f"   Analysis: {w.explanation}",
                 "",
@@ -268,11 +284,7 @@ class Verdict:
             "---",
             "",
             "CONTEXT:",
-            "While this content may not meet the threshold for removal under current policies, we believe it contributes to a hostile environment for the communities identified above. We request your team review whether:",
-            "",
-            "1. The content crosses policy lines under closer examination",
-            "2. The account shows a pattern of similar borderline content",
-            "3. Updated policy guidance should address this type of content",
+            "This finding was generated from warning-level signals, but for this report it is treated as a violation because it maps to the policy references listed above.",
             "",
             "This report is submitted in good faith to support platform safety.",
             "",

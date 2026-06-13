@@ -26,6 +26,7 @@ class Platform(str, Enum):
     instagram = "instagram"
     facebook = "facebook"
     linkedin = "linkedin"
+    reddit = "reddit"
     twitter = "twitter"
 
 

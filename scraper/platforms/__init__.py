@@ -5,7 +5,7 @@ decorators populate the registry. Orchestration code should depend only on
 ``get_scraper`` / ``iter_enabled`` from :mod:`scraper.platforms.base`.
 """
 
-from scraper.platforms import facebook, instagram, linkedin, tiktok, twitter
+from scraper.platforms import facebook, instagram, linkedin, reddit, tiktok, twitter
 from scraper.platforms.base import (
     PlatformScraper,
     get_scraper,
@@ -24,5 +24,6 @@ __all__ = [
     "instagram",
     "facebook",
     "linkedin",
+    "reddit",
     "twitter",
 ]

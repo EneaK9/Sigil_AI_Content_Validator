@@ -37,19 +37,18 @@ campaigns:
     daily_target: 1000
     enabled: true
 
-  # Facebook campaign - compound story queries only
+  # Facebook campaign - broad keyword query for F60Kx7YJNOmKmqQm3
   - platform: facebook
     topic: albania_political
     country: AL
     seeds:
-      - "Jared Kushner Albania protest"
-      - "Kushner Sazan Albania"
-      - "Trump Kushner Albania resort"
-      - "Ivanka Trump Albania resort"
-      - "Edi Rama Kushner Sazan"
-      - "Albania protest Kushner resort"
-      - "Sazan Island Kushner protest"
-      - "Kushner Shqiperi protesta"
+      - "protesta"
+      - "albania"
+      - "shqiperia"
+      - "kushner"
+      - "trump"
+      - "edi rama"
+      - "izrael"
     daily_target: 1000
     enabled: true
 
@@ -67,4 +66,26 @@ campaigns:
       - "Sazan Island Kushner protest"
       - "Kushner Shqiperi protesta"
     daily_target: 1000
+    enabled: true
+
+  # LinkedIn campaign - compound story queries
+  - platform: linkedin
+    topic: albania_political
+    country: AL
+    seeds:
+      - "Jared Kushner Albania"
+      - "Kushner Sazan resort"
+      - "Albania protest Kushner"
+      - "Edi Rama Kushner"
+      - "Trump Albania investment"
+    daily_target: 500
+    enabled: true
+
+  # Reddit campaign - r/albania plus search terms
+  - platform: reddit
+    topic: albania_political
+    country: AL
+    seeds:
+      - "rama, protests, kushner, trump, israel, albania"
+    daily_target: 100
     enabled: true

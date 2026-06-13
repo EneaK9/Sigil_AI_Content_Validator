@@ -1,9 +1,18 @@
-"""Facebook adapter (Apify actor ``scrapio/facebook-posts-search-scraper``).
+"""Facebook adapter (Apify actor ``F60Kx7YJNOmKmqQm3``).
 
 This adapter uses a SEARCH-based scraper that finds Facebook posts by keyword.
-Seeds can be:
-  - Search keywords (e.g. "football", "Edi Rama")
-  - Full search URLs (e.g. "https://www.facebook.com/search/top/?q=football")
+Seeds are combined into a comma-separated query string.
+
+Input format for new actor:
+{
+  "end_date": "2026-06-13",
+  "location_uid": "Albania",
+  "max_results": 1000,
+  "query": "protesta,albania,kushner,trump,edi rama",
+  "recent_posts": false,
+  "search_type": "posts",
+  "start_date": "2026-06-01"
+}
 
 NOTE: Apify actor input schemas drift. Confirm exact keys against the actor's
 page in the Apify console before relying on a new field.
@@ -11,6 +20,7 @@ page in the Apify console before relying on a new field.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any
 
 from scraper.config import get_settings
@@ -38,27 +48,33 @@ class FacebookScraper(PlatformScraper):
     def build_input(self, campaign: Campaign) -> dict[str, Any]:
         settings = get_settings()
         
-        search_queries: list[str] = []
-        start_urls: list[str] = []
-        
+        keywords: list[str] = []
         for seed in campaign.seeds:
             s = seed.strip()
             if not s:
                 continue
-            if s.startswith("http://") or s.startswith("https://"):
-                start_urls.append(s)
-            else:
-                search_queries.append(s)
+            if not (s.startswith("http://") or s.startswith("https://")):
+                keywords.append(s)
+        
+        query_string = ",".join(keywords) if keywords else "Albania protest Kushner"
+        
+        today = datetime.now()
+        start_date = (today - timedelta(days=365)).strftime("%Y-%m-%d")
+        end_date = today.strftime("%Y-%m-%d")
+        
+        location = campaign.country if campaign.country else "Albania"
+        if location == "AL":
+            location = "Albania"
         
         run_input: dict[str, Any] = {
-            "maxPosts": min(settings.results_limit_per_run, 500),
-            "proxyConfiguration": {"useApifyProxy": True},
+            "query": query_string,
+            "max_results": min(settings.results_limit_per_run, 1000),
+            "start_date": start_date,
+            "end_date": end_date,
+            "location_uid": location,
+            "search_type": "posts",
+            "recent_posts": False,
         }
-        
-        if start_urls:
-            run_input["startUrls"] = start_urls
-        if search_queries:
-            run_input["searchQueries"] = search_queries
         
         return run_input
 

@@ -9,8 +9,16 @@ from pathlib import Path
 from typing import Optional, Union
 
 import anthropic
+from openai import OpenAI, OpenAIError
 
-from config import CLAUDE_MODEL, CLAUDE_MAX_TOKENS, DEBUG_DIR, PREFERRED_MAX_IMAGES
+from config import (
+    CLAUDE_MODEL,
+    CLAUDE_MAX_TOKENS,
+    DEBUG_DIR,
+    OPENAI_MODEL,
+    OPENAI_MAX_TOKENS,
+    PREFERRED_MAX_IMAGES,
+)
 from core.models import PostData, Violation, Warning, Verdict, JudgmentError, ScrapingError
 from core.image_fetcher import fetch_image_as_base64
 from core.video_transcriber import transcribe_video
@@ -148,7 +156,11 @@ Return a JSON object with this exact structure:
       "explanation": "what's wrong with this — be detailed",
       "problematic_element": "exact phrase or element that's problematic",
       "affected_groups": ["who could be harmed or offended"],
-      "why_it_matters": "educational context — why this matters even if subtle"
+      "why_it_matters": "educational context — why this matters even if subtle",
+      "rule": "exact ToS or Community Guidelines rule this warning breaks or approaches",
+      "severity": "HIGH" | "MEDIUM" | "LOW",
+      "policy_reference": "exact ToS or Community Guidelines section name from the policy document",
+      "quote": "verbatim phrase or content element that creates the warning"
     }}
   ],
   "passed_checks": ["list of policy categories that were checked and passed"],
@@ -160,7 +172,8 @@ Rules:
 - If violations is non-empty → verdict must be "CLEAR_VIOLATION"
 - If violations is empty but warnings is non-empty → verdict must be "POSSIBLE_VIOLATION"
 - If both empty → verdict is "PASS" (but look harder — PASS should be rare)
-- When in doubt, flag it. Over-flagging is better than missing something."""
+- When in doubt, flag it. Over-flagging is better than missing something.
+- Every warning must still identify the exact ToS or Community Guidelines section it breaks or approaches. Do not create vague warnings without rule, policy_reference, and quote."""
     
     return prompt + transcript_text
 
@@ -313,7 +326,11 @@ def build_verdict(post: PostData, data: dict) -> Verdict:
                 explanation=w.get("explanation", ""),
                 problematic_element=w.get("problematic_element", ""),
                 affected_groups=w.get("affected_groups", []),
-                why_it_matters=w.get("why_it_matters", "")
+                why_it_matters=w.get("why_it_matters", ""),
+                rule=w.get("rule", ""),
+                severity=w.get("severity", "LOW"),
+                policy_reference=w.get("policy_reference", ""),
+                quote=w.get("quote", w.get("problematic_element", "")),
             ))
         except ValueError as e:
             raise JudgmentError(
@@ -341,6 +358,106 @@ def build_verdict(post: PostData, data: dict) -> Verdict:
     return verdict
 
 
+def _parse_model_json(raw: str, provider: str) -> dict:
+    """Parse model JSON and save invalid responses for debugging."""
+    raw = raw.strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        DEBUG_DIR.mkdir(exist_ok=True)
+        debug_file = DEBUG_DIR / "last_response.txt"
+        debug_file.write_text(raw, encoding="utf-8")
+
+        raise JudgmentError(
+            f"{provider} returned invalid JSON. Raw response saved to debug/last_response.txt\n"
+            f"First 200 chars: {raw[:200]}\n"
+            f"JSON parse error: {e}"
+        )
+
+
+def _judge_with_openai(
+    post: PostData,
+    policies_text: str,
+    provided_transcript: Optional[str] = None,
+) -> Verdict:
+    """Send post and policies to OpenAI for policy compliance analysis."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise JudgmentError(
+            "OPENAI_API_KEY environment variable is not set. "
+            "Create a .env file with: OPENAI_API_KEY=your-key-here"
+        )
+
+    transcript_text = ""
+    if provided_transcript:
+        transcript_text = f"\n\n[Video transcript]\n{provided_transcript}"
+    elif post.video_urls:
+        transcript_text = fetch_video_transcripts(post)
+
+    prompt_text = build_user_prompt(post, policies_text, transcript_text)
+    if post.image_urls:
+        prompt_text += (
+            f"\n\n[Note: Post contains {len(post.image_urls)} image(s). "
+            "This OpenAI validation run is analyzing text and metadata only.]"
+        )
+
+    client = OpenAI(api_key=api_key)
+
+    try:
+        response = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            max_tokens=OPENAI_MAX_TOKENS,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt_text},
+            ],
+        )
+    except OpenAIError as e:
+        raise JudgmentError(
+            f"OpenAI API error: {e}. "
+            f"Check your API key and internet connection."
+        )
+
+    raw = response.choices[0].message.content or ""
+    return build_verdict(post, _parse_model_json(raw, "OpenAI"))
+
+
+def _judge_with_claude(
+    post: PostData,
+    policies_text: str,
+    provided_transcript: Optional[str] = None,
+) -> Verdict:
+    """Send post and policies to Claude for policy compliance analysis."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise JudgmentError(
+            "ANTHROPIC_API_KEY environment variable is not set. "
+            "Create a .env file with: ANTHROPIC_API_KEY=your-key-here"
+        )
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    # Build message content (text-only or multimodal with images)
+    message_content = build_message_content(post, policies_text, provided_transcript)
+
+    try:
+        response = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=CLAUDE_MAX_TOKENS,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": message_content}]
+        )
+    except anthropic.APIError as e:
+        raise JudgmentError(
+            f"Claude API error: {e}. "
+            f"Check your API key and internet connection."
+        )
+
+    raw = response.content[0].text.strip()
+    return build_verdict(post, _parse_model_json(raw, "Claude"))
+
+
 def judge(
     post: PostData, 
     policies_text: str,
@@ -360,46 +477,7 @@ def judge(
     Raises:
         JudgmentError: If Claude API call fails or response cannot be parsed
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise JudgmentError(
-            "ANTHROPIC_API_KEY environment variable is not set. "
-            "Create a .env file with: ANTHROPIC_API_KEY=your-key-here"
-        )
-    
-    client = anthropic.Anthropic(api_key=api_key)
-    
-    # Build message content (text-only or multimodal with images)
-    message_content = build_message_content(post, policies_text, provided_transcript)
-    
-    try:
-        response = client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=CLAUDE_MAX_TOKENS,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": message_content}]
-        )
-    except anthropic.APIError as e:
-        raise JudgmentError(
-            f"Claude API error: {e}. "
-            f"Check your API key and internet connection."
-        )
-    
-    raw = response.content[0].text.strip()
-    
-    # Try to parse JSON
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        # Save raw response for debugging
-        DEBUG_DIR.mkdir(exist_ok=True)
-        debug_file = DEBUG_DIR / "last_response.txt"
-        debug_file.write_text(raw, encoding="utf-8")
-        
-        raise JudgmentError(
-            f"Claude returned invalid JSON. Raw response saved to debug/last_response.txt\n"
-            f"First 200 chars: {raw[:200]}\n"
-            f"JSON parse error: {e}"
-        )
-    
-    return build_verdict(post, data)
+    if os.environ.get("OPENAI_API_KEY"):
+        return _judge_with_openai(post, policies_text, provided_transcript)
+
+    return _judge_with_claude(post, policies_text, provided_transcript)

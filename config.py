@@ -8,6 +8,10 @@ from pathlib import Path
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
 CLAUDE_MAX_TOKENS = 2000
 
+# OpenAI API
+OPENAI_MODEL = "gpt-4o"
+OPENAI_MAX_TOKENS = 2000
+
 # Scraper settings
 SCRAPER_TIMEOUT_SECONDS = 10
 SCRAPER_USER_AGENT = "Mozilla/5.0 (compatible; PolicyGuard/1.0; policy compliance research)"
@@ -21,7 +25,7 @@ POLICIES_DIR = BASE_DIR / "policies"
 DEBUG_DIR = BASE_DIR / "debug"
 
 # Platforms
-SUPPORTED_PLATFORMS = ["reddit", "x", "tiktok", "facebook", "instagram"]
+SUPPORTED_PLATFORMS = ["reddit", "x", "tiktok", "facebook", "instagram", "linkedin"]
 AUTO_SCRAPE_PLATFORMS = ["reddit", "x", "tiktok"]
 
 # Policy sources for scraping
@@ -45,6 +49,7 @@ PLATFORM_POLICY_FILES = {
     "x": ["x_rules.md", "x_tos.md"],
     "tiktok": ["tiktok_community.md", "tiktok_tos.md"],
     "reddit": ["reddit_content_policy.md", "reddit_user_agreement.md"],
+    "linkedin": ["linkedin_community.md", "linkedin_tos.md"],
 }
 
 # Image analysis
@@ -63,6 +68,7 @@ PLATFORM_PATTERNS = {
     "tiktok": ["tiktok.com/@", "vm.tiktok.com/"],
     "facebook": ["facebook.com/", "fb.com/", "fb.watch/"],
     "instagram": ["instagram.com/p/", "instagram.com/reel/"],
+    "linkedin": ["linkedin.com/posts/", "linkedin.com/feed/"],
 }
 
 # API settings

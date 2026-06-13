@@ -306,7 +306,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--platform",
-        choices=["tiktok", "instagram", "facebook", "twitter"],
+        choices=["tiktok", "instagram", "facebook", "twitter", "linkedin", "reddit"],
         help="Filter by platform (run all if not specified)",
     )
     parser.add_argument(

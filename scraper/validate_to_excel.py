@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import concurrent.futures
 import threading
@@ -37,6 +38,8 @@ OUTPUT_DIR = Path(__file__).parent.parent / "validation_results"
 # Thread-safe counter
 progress_lock = threading.Lock()
 progress_counter = {"processed": 0, "violations": 0, "errors": 0}
+
+EXCEL_ILLEGAL_CHAR_RE = re.compile(r"[\x00-\x08\x0b-\x0c\x0e-\x1f]")
 
 
 def load_scraped_posts(
@@ -137,21 +140,32 @@ def validate_post(post: dict[str, Any], policies_cache: dict[str, str], total: i
         post_data = post_to_postdata(post, skip_video=skip_video)
         verdict = judge(post_data, policies_cache[platform])
         
-        result["verdict"] = verdict.verdict
+        unified_violations = list(verdict.violations)
+        for warning in verdict.warnings:
+            unified_violations.append(
+                type("UnifiedViolation", (), {
+                    "rule": warning.rule or warning.category,
+                    "severity": warning.severity,
+                    "explanation": warning.explanation,
+                    "policy_reference": warning.policy_reference,
+                    "quote": warning.quote or warning.problematic_element,
+                })()
+            )
+
+        result["verdict"] = "FLAGGED" if unified_violations else "PASS"
         result["confidence"] = verdict.confidence
         result["recommendation"] = verdict.recommendation
         result["checked_at"] = verdict.checked_at
+        result["violations_count"] = len(unified_violations)
         
-        # Flatten violations
-        if verdict.violations:
-            result["violations_count"] = len(verdict.violations)
-            result["violation_rules"] = "; ".join(v.rule for v in verdict.violations)
-            result["violation_severities"] = "; ".join(v.severity for v in verdict.violations)
-            result["violation_explanations"] = "; ".join(v.explanation[:200] for v in verdict.violations)
-            result["violation_quotes"] = "; ".join(v.quote[:100] for v in verdict.violations)
-            result["violation_policy_refs"] = "; ".join(v.policy_reference for v in verdict.violations)
+        # Flatten every flagged finding as a violation for the Excel deliverable.
+        if unified_violations:
+            result["violation_rules"] = "; ".join(v.rule for v in unified_violations)
+            result["violation_severities"] = "; ".join(v.severity for v in unified_violations)
+            result["violation_explanations"] = "; ".join(v.explanation[:300] for v in unified_violations)
+            result["violation_quotes"] = "; ".join(v.quote[:150] for v in unified_violations)
+            result["violation_policy_refs"] = "; ".join(v.policy_reference for v in unified_violations)
         else:
-            result["violations_count"] = 0
             result["violation_rules"] = ""
             result["violation_severities"] = ""
             result["violation_explanations"] = ""
@@ -163,6 +177,10 @@ def validate_post(post: dict[str, Any], policies_cache: dict[str, str], total: i
             result["warnings_count"] = len(verdict.warnings)
             result["warning_categories"] = "; ".join(w.category for w in verdict.warnings)
             result["warning_risk_levels"] = "; ".join(w.risk_level for w in verdict.warnings)
+            result["warning_rules"] = "; ".join(w.rule for w in verdict.warnings)
+            result["warning_severities"] = "; ".join(w.severity for w in verdict.warnings)
+            result["warning_policy_refs"] = "; ".join(w.policy_reference for w in verdict.warnings)
+            result["warning_quotes"] = "; ".join((w.quote or w.problematic_element)[:100] for w in verdict.warnings)
             result["warning_explanations"] = "; ".join(w.explanation[:200] for w in verdict.warnings)
             result["warning_elements"] = "; ".join(w.problematic_element[:100] for w in verdict.warnings)
             result["warning_affected_groups"] = "; ".join(
@@ -177,11 +195,15 @@ def validate_post(post: dict[str, Any], policies_cache: dict[str, str], total: i
             result["warnings_count"] = 0
             result["warning_categories"] = ""
             result["warning_risk_levels"] = ""
+            result["warning_rules"] = ""
+            result["warning_severities"] = ""
+            result["warning_policy_refs"] = ""
+            result["warning_quotes"] = ""
             result["warning_explanations"] = ""
             result["warning_elements"] = ""
             result["warning_affected_groups"] = ""
             result["warning_why_matters"] = ""
-        
+
         result["passed_checks"] = ", ".join(verdict.passed_checks)
         result["report_message"] = verdict.generate_report_message()[:5000] if verdict.verdict != "PASS" else ""
         result["error"] = ""
@@ -197,8 +219,10 @@ def validate_post(post: dict[str, Any], policies_cache: dict[str, str], total: i
         
     except PolicyNotFoundError as e:
         result["verdict"] = "ERROR"
+        result["model_verdict"] = "ERROR"
         result["error"] = f"Policy not found: {e}"
         result["confidence"] = 0
+        result["findings_count"] = 0
         result["violations_count"] = 0
         result["warnings_count"] = 0
         with progress_lock:
@@ -207,8 +231,10 @@ def validate_post(post: dict[str, Any], policies_cache: dict[str, str], total: i
         
     except JudgmentError as e:
         result["verdict"] = "ERROR"
+        result["model_verdict"] = "ERROR"
         result["error"] = f"Judgment error: {str(e)[:300]}"
         result["confidence"] = 0
+        result["findings_count"] = 0
         result["violations_count"] = 0
         result["warnings_count"] = 0
         with progress_lock:
@@ -217,8 +243,10 @@ def validate_post(post: dict[str, Any], policies_cache: dict[str, str], total: i
         
     except Exception as e:
         result["verdict"] = "ERROR"
+        result["model_verdict"] = "ERROR"
         result["error"] = f"Unexpected: {str(e)[:300]}"
         result["confidence"] = 0
+        result["findings_count"] = 0
         result["violations_count"] = 0
         result["warnings_count"] = 0
         with progress_lock:
@@ -229,7 +257,7 @@ def validate_post(post: dict[str, Any], policies_cache: dict[str, str], total: i
 
 
 def export_to_excel(results: list[dict[str, Any]], output_path: Path) -> None:
-    """Export results to Excel file."""
+    """Export flagged validation results to Excel file."""
     try:
         import pandas as pd
     except ImportError:
@@ -238,17 +266,19 @@ def export_to_excel(results: list[dict[str, Any]], output_path: Path) -> None:
         import pandas as pd
     
     df = pd.DataFrame(results)
+    total_results = len(df)
+
+    # Deliverable files should contain only posts that need review/reporting.
+    if "verdict" in df.columns:
+        df = df[df["verdict"] == "FLAGGED"].copy()
     
     # Reorder columns for better UX
     column_order = [
         # Core verdict
-        "platform", "verdict", "confidence", 
-        # Violations detail
+        "platform", "verdict", "confidence",
+        # Unified violation detail. Warning-level findings are included here.
         "violations_count", "violation_rules", "violation_severities", 
         "violation_explanations", "violation_quotes", "violation_policy_refs",
-        # Warnings detail (for POSSIBLE_VIOLATION)
-        "warnings_count", "warning_categories", "warning_risk_levels",
-        "warning_explanations", "warning_elements", "warning_affected_groups", "warning_why_matters",
         # Post metadata
         "post_id", "url", "author", "content_text",
         "posted_at", "like_count", "comment_count", "view_count", "hashtags",
@@ -260,15 +290,22 @@ def export_to_excel(results: list[dict[str, Any]], output_path: Path) -> None:
     # Only include columns that exist
     columns = [c for c in column_order if c in df.columns]
     df = df[columns]
+
+    # openpyxl rejects ASCII control characters that can appear in scraped text.
+    df = df.map(
+        lambda value: EXCEL_ILLEGAL_CHAR_RE.sub("", value)
+        if isinstance(value, str)
+        else value
+    )
     
     # Save to Excel
     df.to_excel(output_path, index=False, engine="openpyxl")
-    print(f"\nExported {len(results)} results to: {output_path}")
+    print(f"\nExported {len(df)} flagged results to: {output_path} ({total_results} processed)")
     
     # Also export a summary CSV for quick viewing
     summary_path = output_path.with_suffix(".summary.csv")
-    summary_cols = ["platform", "verdict", "confidence", "violations_count", "warnings_count", 
-                    "warning_categories", "author", "content_text", "url"]
+    summary_cols = ["platform", "verdict", "confidence", "violations_count",
+                    "violation_rules", "violation_policy_refs", "author", "content_text", "url"]
     summary_cols = [c for c in summary_cols if c in df.columns]
     df[summary_cols].to_csv(summary_path, index=False)
     print(f"Exported summary to: {summary_path}")
@@ -276,7 +313,7 @@ def export_to_excel(results: list[dict[str, Any]], output_path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate scraped posts and export to Excel")
-    parser.add_argument("--platform", action="append", choices=["tiktok", "instagram", "facebook", "twitter"], 
+    parser.add_argument("--platform", action="append", choices=["tiktok", "instagram", "facebook", "twitter", "linkedin", "reddit"], 
                         help="Filter by platform (can specify multiple)")
     parser.add_argument("--limit", type=int, help="Limit number of posts to process")
     parser.add_argument("--output", type=str, help="Output Excel file path")
@@ -345,14 +382,12 @@ def main() -> int:
     
     total_processed = len(results)
     passes = sum(1 for r in results if r.get("verdict") == "PASS")
-    possible_violations = sum(1 for r in results if r.get("verdict") == "POSSIBLE_VIOLATION")
-    clear_violations = sum(1 for r in results if r.get("verdict") == "CLEAR_VIOLATION")
+    flagged = sum(1 for r in results if r.get("verdict") == "FLAGGED")
     errors = sum(1 for r in results if r.get("verdict") == "ERROR")
     
     print(f"Total processed: {total_processed}")
     print(f"  PASS: {passes} ({100*passes/total_processed:.1f}%)")
-    print(f"  POSSIBLE_VIOLATION: {possible_violations} ({100*possible_violations/total_processed:.1f}%)")
-    print(f"  CLEAR_VIOLATION: {clear_violations} ({100*clear_violations/total_processed:.1f}%)")
+    print(f"  FLAGGED: {flagged} ({100*flagged/total_processed:.1f}%)")
     print(f"  ERROR: {errors} ({100*errors/total_processed:.1f}%)")
     
     # Export

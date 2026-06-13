@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     twitter_actor_id: str = Field(
         "apidojo/twitter-scraper-lite", alias="TWITTER_ACTOR_ID"
     )
+    linkedin_actor_id: str = Field(
+        "buIWk2uOUzTmcLsuB", alias="LINKEDIN_ACTOR_ID"
+    )
+    reddit_actor_id: str = Field(
+        "xBj1aoFdikikCx40j", alias="REDDIT_ACTOR_ID"
+    )
 
     def actor_id_for(self, platform: Platform) -> str:
         """Resolve the configured Apify actor id for a platform."""
@@ -68,10 +74,12 @@ class Settings(BaseSettings):
             Platform.instagram: self.instagram_actor_id,
             Platform.facebook: self.facebook_actor_id,
             Platform.twitter: self.twitter_actor_id,
+            Platform.linkedin: self.linkedin_actor_id,
+            Platform.reddit: self.reddit_actor_id,
         }
         try:
             return mapping[platform]
-        except KeyError as exc:  # linkedin has no actor yet
+        except KeyError as exc:
             raise KeyError(f"No actor configured for platform {platform!r}") from exc
 
 

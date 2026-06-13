@@ -39,6 +39,9 @@ env/
 # Debug output (may contain sensitive data)
 debug/last_response.txt
 
+# Generated validation exports
+validation_results/
+
 # OS files
 .DS_Store
 Thumbs.db
