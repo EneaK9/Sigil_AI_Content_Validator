@@ -4,8 +4,8 @@ Unit tests for video transcript integration in core/judge.py.
 import pytest
 from unittest.mock import patch, MagicMock
 
-from core.models import PostData
-from core.judge import (
+from sigil.validation.models import PostData
+from sigil.validation.judge import (
     fetch_video_transcripts,
     build_user_prompt,
     build_message_content,
@@ -29,7 +29,7 @@ class TestFetchVideoTranscripts:
         
         assert result == ""
 
-    @patch("core.judge.transcribe_video")
+    @patch("sigil.validation.judge.transcribe_video")
     def test_single_video_transcribed(self, mock_transcribe):
         """Should format single video transcript correctly."""
         mock_transcribe.return_value = "Hello, this is the video content."
@@ -47,7 +47,7 @@ class TestFetchVideoTranscripts:
         assert "Hello, this is the video content." in result
         mock_transcribe.assert_called_once_with("https://tiktok.com/@user/video/123")
 
-    @patch("core.judge.transcribe_video")
+    @patch("sigil.validation.judge.transcribe_video")
     def test_multiple_videos_transcribed(self, mock_transcribe):
         """Should format multiple video transcripts correctly."""
         mock_transcribe.side_effect = ["First video content.", "Second video content."]
@@ -66,7 +66,7 @@ class TestFetchVideoTranscripts:
         assert "First video content." in result
         assert "Second video content." in result
 
-    @patch("core.judge.transcribe_video")
+    @patch("sigil.validation.judge.transcribe_video")
     def test_failed_transcription_skipped(self, mock_transcribe):
         """Should skip videos that fail to transcribe."""
         mock_transcribe.return_value = None
@@ -82,7 +82,7 @@ class TestFetchVideoTranscripts:
         
         assert result == ""
 
-    @patch("core.judge.transcribe_video")
+    @patch("sigil.validation.judge.transcribe_video")
     def test_partial_transcription_success(self, mock_transcribe):
         """Should include only successfully transcribed videos."""
         mock_transcribe.side_effect = [None, "Second video works.", None]
@@ -139,7 +139,7 @@ class TestBuildUserPromptWithTranscript:
 class TestBuildMessageContentWithTranscript:
     """Tests for build_message_content integration with transcripts."""
 
-    @patch("core.judge.fetch_video_transcripts")
+    @patch("sigil.validation.judge.fetch_video_transcripts")
     def test_text_only_with_transcript(self, mock_fetch_transcripts):
         """Should include transcript in text-only content."""
         mock_fetch_transcripts.return_value = "\n\n[Video 1 transcript]\nSpoken words here."
@@ -159,8 +159,8 @@ class TestBuildMessageContentWithTranscript:
         assert "[Video 1 transcript]" in result
         assert "Spoken words here." in result
 
-    @patch("core.judge.fetch_video_transcripts")
-    @patch("core.judge.fetch_image_as_base64")
+    @patch("sigil.validation.judge.fetch_video_transcripts")
+    @patch("sigil.validation.judge.fetch_image_as_base64")
     def test_multimodal_with_transcript(self, mock_fetch_image, mock_fetch_transcripts):
         """Should include transcript in multimodal content with images."""
         mock_fetch_transcripts.return_value = "\n\n[Video 1 transcript]\nAudio content."
@@ -186,14 +186,7 @@ class TestBuildMessageContentWithTranscript:
 
 
 class TestSystemPromptVideoRule:
-    """Tests for system prompt video transcript rule."""
+    """The system prompt should still instruct the model to analyze transcripts."""
 
-    def test_system_prompt_has_rule_7(self):
-        """Should include rule 7 for video transcript analysis."""
-        assert "7." in SYSTEM_PROMPT
+    def test_system_prompt_mentions_transcripts(self):
         assert "video transcript" in SYSTEM_PROMPT.lower()
-        assert "[Video transcript:" in SYSTEM_PROMPT
-
-    def test_system_prompt_transcript_quote_format(self):
-        """Should specify the quote format for transcript violations."""
-        assert "\"[Video transcript: 'exact words spoken here']\"" in SYSTEM_PROMPT

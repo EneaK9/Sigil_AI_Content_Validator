@@ -36,11 +36,22 @@ env/
 *.swo
 *~
 
-# Debug output (may contain sensitive data)
-debug/last_response.txt
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Generated validation exports
+# Debug output (may contain sensitive data)
+debug/
+
+# Generated data / exports (investigation artifacts, not source)
+scraper_results/
 validation_results/
+
+# Logs and stray data dumps
+*.log
+*.jsonl
+/*.csv
 
 # OS files
 .DS_Store

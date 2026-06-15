@@ -1,3 +1,0 @@
-"""
-PolicyGuard REST API package.
-"""

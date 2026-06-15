@@ -5,14 +5,14 @@ import base64
 import pytest
 from unittest.mock import patch, MagicMock
 
-from core.image_fetcher import (
+from sigil.validation.image_fetcher import (
     fetch_image_as_base64,
     _get_media_type_from_url,
     _get_media_type,
     MAX_IMAGE_SIZE_BYTES,
     SUPPORTED_IMAGE_TYPES,
 )
-from core.models import ScrapingError
+from sigil.validation.models import ScrapingError
 
 
 class TestGetMediaTypeFromUrl:
@@ -75,8 +75,8 @@ class TestGetMediaType:
 class TestFetchImageAsBase64:
     """Tests for fetch_image_as_base64 function."""
 
-    @patch("core.image_fetcher.requests.head")
-    @patch("core.image_fetcher.requests.get")
+    @patch("sigil.validation.image_fetcher.requests.head")
+    @patch("sigil.validation.image_fetcher.requests.get")
     def test_successful_fetch(self, mock_get, mock_head):
         """Should successfully fetch and encode image."""
         # Setup mocks
@@ -92,7 +92,7 @@ class TestFetchImageAsBase64:
         assert media_type == "image/jpeg"
         assert base64_data == base64.b64encode(b"fake image data").decode("utf-8")
 
-    @patch("core.image_fetcher.requests.head")
+    @patch("sigil.validation.image_fetcher.requests.head")
     def test_image_too_large_from_header(self, mock_head):
         """Should reject images that are too large (from Content-Length header)."""
         mock_head.return_value.headers = {"Content-Length": str(MAX_IMAGE_SIZE_BYTES + 1)}
@@ -102,8 +102,8 @@ class TestFetchImageAsBase64:
         
         assert "too large" in str(exc_info.value).lower()
 
-    @patch("core.image_fetcher.requests.head")
-    @patch("core.image_fetcher.requests.get")
+    @patch("sigil.validation.image_fetcher.requests.head")
+    @patch("sigil.validation.image_fetcher.requests.get")
     def test_image_too_large_after_download(self, mock_get, mock_head):
         """Should reject images that are too large after download."""
         mock_head.return_value.headers = {}  # No Content-Length
@@ -118,7 +118,7 @@ class TestFetchImageAsBase64:
         
         assert "too large" in str(exc_info.value).lower()
 
-    @patch("core.image_fetcher.requests.head")
+    @patch("sigil.validation.image_fetcher.requests.head")
     def test_timeout_error(self, mock_head):
         """Should handle timeout errors."""
         import requests
@@ -129,8 +129,8 @@ class TestFetchImageAsBase64:
         
         assert "timed out" in str(exc_info.value).lower()
 
-    @patch("core.image_fetcher.requests.head")
-    @patch("core.image_fetcher.requests.get")
+    @patch("sigil.validation.image_fetcher.requests.head")
+    @patch("sigil.validation.image_fetcher.requests.get")
     def test_http_error(self, mock_get, mock_head):
         """Should handle HTTP errors."""
         import requests
@@ -146,8 +146,8 @@ class TestFetchImageAsBase64:
         
         assert "404" in str(exc_info.value)
 
-    @patch("core.image_fetcher.requests.head")
-    @patch("core.image_fetcher.requests.get")
+    @patch("sigil.validation.image_fetcher.requests.head")
+    @patch("sigil.validation.image_fetcher.requests.get")
     def test_various_image_types(self, mock_get, mock_head):
         """Should handle various supported image types."""
         mock_head.return_value.headers = {}
