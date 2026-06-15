@@ -85,7 +85,7 @@ sigil-migrate
 ## Running
 
 ```bash
-# Long-running scheduler: runner + collector loops + live status server (:8002)
+# Long-running scheduler: ALL loops (runner + collector + validator + status :8002)
 sigil-scheduler
 
 # Validation REST API (trigger validation, read violations/stats) on :8001
@@ -93,13 +93,50 @@ uvicorn sigil.scraper.api:app --host 0.0.0.0 --port 8001
 
 # One-off / manual operations via the CLI
 sigil scrape  --platform tiktok --limit 500   # manual bulk scrape (bypasses budget guards)
-sigil validate --platform tiktok --limit 100  # validate pending posts
+sigil validate --platform tiktok --limit 100  # validate pending posts (one-shot, then exits)
 sigil report   --platform tiktok              # print flagged posts
 sigil stats                                   # validation counts
 ```
 
 See [docs/deployment.md](docs/deployment.md) for a containerless (systemd)
 production deployment.
+
+### Scheduler components
+
+`sigil-scheduler` runs four independent async loops. By default it runs all of
+them, but you can start any subset — useful for splitting work across hosts, or
+for running just the part you care about.
+
+| Component | What it does | Needs |
+| --- | --- | --- |
+| `runner` | Starts Apify actor runs for due campaigns (`RUNNER_INTERVAL_SECS`) | Apify + Supabase |
+| `collector` | Polls in-flight runs and ingests finished posts (`COLLECTOR_INTERVAL_SECS`) | Apify + Supabase |
+| `validator` | Drains pending posts through the LLM judge into `flagged_posts` (`VALIDATION_INTERVAL_SECS`) | LLM + Supabase |
+| `status` | Live status HTTP server on `:8002` | Apify + Supabase |
+
+Select components with `--only`:
+
+```bash
+# Run ONLY the validator loop (no Apify involved at all)
+sigil-validator                       # dedicated entrypoint, equivalent to:
+sigil-scheduler --only validator
+
+# Run just the scraping half on one host...
+sigil-scheduler --only runner collector status
+
+# ...and the validation half on another (or the same host)
+sigil-scheduler --only validator
+```
+
+Notes:
+
+- The `validator` loop continuously drains the pending-post queue (it does **not**
+  exit when empty — use `sigil validate` for a one-shot run). It only touches the
+  LLM provider and Supabase, so a validator-only process never constructs an Apify
+  client or needs `APIFY_TOKEN` to be valid.
+- The `validator` loop respects `VALIDATION_ENABLED`; set it to `false` to make the
+  loop a no-op even when selected.
+- `sigil-scheduler` with no flags is unchanged — it still runs all four loops.
 
 ## Live status
 
@@ -115,6 +152,23 @@ The dashboard is a **separate module**. It reads directly from the database
 (`flagged_posts`, newest unreviewed first via the `flagged_posts_unreviewed_idx`
 index) and from the scheduler's `:8002/status` endpoint. Sigil exposes no
 dashboard-specific endpoints.
+
+## Troubleshooting
+
+**Validation logs a flood of `validation_judgment_error` with OpenAI `429 insufficient_quota`.**
+The judge defaults to OpenAI when `OPENAI_API_KEY` is set. A `429 insufficient_quota`
+means the OpenAI account is out of credit/quota — it is a billing issue, not a code
+bug, and the loop will keep retrying every post until it is resolved. Options:
+
+- Top up / fix billing on the OpenAI account, or rotate `OPENAI_API_KEY`.
+- Fall back to Anthropic: unset `OPENAI_API_KEY` (leave it blank in `.env`) and set
+  `ANTHROPIC_API_KEY` + `CLAUDE_MODEL`. The judge uses OpenAI only when its key is
+  present, otherwise Anthropic.
+- Pause validation entirely without stopping scraping: run
+  `sigil-scheduler --only runner collector status`, or set `VALIDATION_ENABLED=false`.
+
+**`sigil-scheduler: error: argument --only: invalid choice`.** `--only` only accepts
+`runner`, `collector`, `validator`, and `status` (space-separated for multiple).
 
 ## Tests
 

@@ -7,13 +7,22 @@ containers: a virtualenv on the host plus two systemd services.
 
 | Process | Command | Port |
 | --- | --- | --- |
-| Scheduler (runner + collector + status) | `sigil-scheduler` | `:8002` (status HTTP) |
+| Scheduler (runner + collector + validator + status) | `sigil-scheduler` | `:8002` (status HTTP) |
 | Validation API | `uvicorn sigil.scraper.api:app` | `:8001` |
 | Migrations (one-shot) | `sigil-migrate` | — |
 
-The scheduler is the steady-state scraper. The validation API is optional and
-only needed if you want to trigger validation / read violations over HTTP; the
-`sigil` CLI can do the same from the shell.
+The scheduler is the steady-state worker. It runs four independent loops
+(`runner`, `collector`, `validator`, `status`) and runs all of them by default.
+You can split them across hosts or services with `--only`, e.g.
+`sigil-scheduler --only runner collector status` on the scraping host and
+`sigil-validator` (= `--only validator`) on a host with LLM access but no Apify.
+The validation API is optional and only needed if you want to trigger validation
+/ read violations over HTTP; the `sigil` CLI can do the same from the shell.
+
+To deploy the validator as its own systemd service, copy the
+`sigil-scheduler.service` unit below and change `ExecStart` to
+`/opt/sigil/.venv/bin/sigil-validator` (and the runner/collector/status unit to
+`ExecStart=/opt/sigil/.venv/bin/sigil-scheduler --only runner collector status`).
 
 ## 1. Provision the host
 

@@ -14,6 +14,7 @@ from uuid import UUID
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sigil.scraper.db.engine import session_scope
@@ -69,6 +70,22 @@ def _chunks(items: list[Any], size: int) -> Iterable[list[Any]]:
         yield items[i : i + size]
 
 
+def _strip_nul(value: Any) -> Any:
+    """Recursively remove NUL bytes (``\\u0000``) from strings.
+
+    Postgres ``text``/``jsonb`` cannot store the NUL character, and scraped
+    payloads (especially Apify ``raw`` blobs) occasionally contain one. A single
+    such byte would otherwise abort the whole ingest batch.
+    """
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, list):
+        return [_strip_nul(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _strip_nul(v) for k, v in value.items()}
+    return value
+
+
 def _post_to_row(post: NormalizedPost) -> dict[str, Any]:
     """Map a NormalizedPost to a ``posts`` row dict."""
     status = (
@@ -76,7 +93,7 @@ def _post_to_row(post: NormalizedPost) -> dict[str, Any]:
         if post.needs_transcription()
         else TranscriptionStatus.not_required
     )
-    return {
+    row = {
         "platform": post.platform.value,
         "platform_post_id": post.platform_post_id,
         "campaign_id": post.campaign_id,
@@ -105,6 +122,7 @@ def _post_to_row(post: NormalizedPost) -> dict[str, Any]:
         "raw": post.raw,
         "scraped_at": post.scraped_at,
     }
+    return _strip_nul(row)
 
 
 async def upsert_posts(rows: list[NormalizedPost]) -> int:
@@ -119,31 +137,77 @@ async def upsert_posts(rows: list[NormalizedPost]) -> int:
     if not rows:
         return 0
 
+    deduped = _dedupe_posts(rows)
+
     affected = 0
-    async with session_scope() as session:
-        for chunk in _chunks(rows, UPSERT_CHUNK_SIZE):
-            values = [_post_to_row(p) for p in chunk]
-            stmt = pg_insert(posts).values(values)
-
-            update_set: dict[str, Any] = {
-                col: getattr(stmt.excluded, col) for col in _VOLATILE_UPDATE_COLUMNS
-            }
-            # Only advance transcription_status toward 'pending'; never downgrade
-            # a row the transcriber has already started/finished.
-            update_set["transcription_status"] = func.greatest(
-                posts.c.transcription_status,
-                stmt.excluded.transcription_status,
-            )
-
-            stmt = stmt.on_conflict_do_update(
-                index_elements=[posts.c.platform, posts.c.platform_post_id],
-                set_=update_set,
-            )
-            result = await session.execute(stmt)
-            affected += result.rowcount or 0
+    for chunk in _chunks(deduped, UPSERT_CHUNK_SIZE):
+        affected += await _upsert_post_chunk(chunk)
 
     log.info("posts_upserted", count=affected, received=len(rows))
     return affected
+
+
+def _dedupe_posts(rows: list[NormalizedPost]) -> list[NormalizedPost]:
+    """Collapse duplicate (platform, platform_post_id) rows, keeping the last.
+
+    A single ``INSERT ... ON CONFLICT DO UPDATE`` cannot touch the same row
+    twice, and Apify result sets occasionally repeat a post within one batch.
+    The last occurrence wins (latest scrape of that post).
+    """
+    by_key: dict[tuple[str, str], NormalizedPost] = {}
+    for post in rows:
+        by_key[(post.platform.value, post.platform_post_id)] = post
+    if len(by_key) != len(rows):
+        log.info("posts_deduped", received=len(rows), unique=len(by_key))
+    return list(by_key.values())
+
+
+def _posts_upsert_stmt(values: list[dict[str, Any]]):
+    """Build the ``INSERT ... ON CONFLICT DO UPDATE`` statement for ``posts``."""
+    stmt = pg_insert(posts).values(values)
+    update_set: dict[str, Any] = {
+        col: getattr(stmt.excluded, col) for col in _VOLATILE_UPDATE_COLUMNS
+    }
+    # Only advance transcription_status toward 'pending'; never downgrade a row
+    # the transcriber has already started/finished.
+    update_set["transcription_status"] = func.greatest(
+        posts.c.transcription_status,
+        stmt.excluded.transcription_status,
+    )
+    return stmt.on_conflict_do_update(
+        index_elements=[posts.c.platform, posts.c.platform_post_id],
+        set_=update_set,
+    )
+
+
+async def _upsert_post_chunk(chunk: list[NormalizedPost]) -> int:
+    """Upsert one chunk; on DB error, retry row-by-row so a single poison row
+    cannot abort the whole ingest. Unsalvageable rows are skipped and logged
+    with their id and the underlying error."""
+    values = [_post_to_row(p) for p in chunk]
+    try:
+        async with session_scope() as session:
+            result = await session.execute(_posts_upsert_stmt(values))
+            return result.rowcount or 0
+    except SQLAlchemyError as exc:
+        if len(chunk) == 1:
+            post = chunk[0]
+            log.error(
+                "post_upsert_skipped",
+                platform=post.platform.value,
+                platform_post_id=post.platform_post_id,
+                error=str(getattr(exc, "orig", exc)),
+            )
+            return 0
+        log.warning(
+            "post_upsert_chunk_failed",
+            chunk_size=len(chunk),
+            error=str(getattr(exc, "orig", exc)),
+        )
+        affected = 0
+        for post in chunk:
+            affected += await _upsert_post_chunk([post])
+        return affected
 
 
 async def upsert_campaigns(campaigns: list[Campaign]) -> int:
@@ -409,6 +473,15 @@ async def status_summary(recent_limit: int = 20) -> dict[str, Any]:
                 .where(posts.c.transcription_status == TranscriptionStatus.pending.value)
             )
         ).scalar_one()
+        # "pending" mirrors pipeline.ValidationStatus.PENDING; kept as a literal so
+        # the DB layer stays free of a pipeline import.
+        pending_validation = (
+            await session.execute(
+                select(func.count())
+                .select_from(posts)
+                .where(posts.c.validation_status == "pending")
+            )
+        ).scalar_one()
 
         status_rows = await session.execute(
             select(scrape_runs.c.status, func.count())
@@ -449,6 +522,7 @@ async def status_summary(recent_limit: int = 20) -> dict[str, Any]:
     return {
         "posts_total": int(posts_total),
         "posts_pending_transcription": int(pending_transcription),
+        "posts_pending_validation": int(pending_validation),
         "runs_by_status": runs_by_status,
         "recent_runs": recent_runs,
     }

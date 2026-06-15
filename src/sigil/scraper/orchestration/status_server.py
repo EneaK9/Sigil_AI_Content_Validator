@@ -84,6 +84,7 @@ async def _build_status(apify: ApifyService) -> dict[str, Any]:
         "generated_at": datetime.now(tz=timezone.utc).isoformat(),
         "posts_total": summary["posts_total"],
         "posts_pending_transcription": summary["posts_pending_transcription"],
+        "posts_pending_validation": summary["posts_pending_validation"],
         "flagged_total": flagged_total,
         "flagged_unreviewed": flagged_unreviewed,
         "runs_by_status": summary["runs_by_status"],

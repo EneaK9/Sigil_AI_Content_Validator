@@ -209,8 +209,26 @@ async def validate_single_post(row: dict[str, Any]) -> dict[str, Any]:
         status = ValidationStatus.FAIL if is_clear_violation else ValidationStatus.PASS
 
         if is_clear_violation:
+            # Re-load policies WITH line numbers so the prosecutor can cite exact
+            # lines, and pass post reach metadata for a richer formal report.
+            report_policies = load_policies(
+                validator_platform(platform), numbered=True
+            )
+            report_metadata = {
+                "posted_at": row.get("posted_at"),
+                "view_count": row.get("view_count"),
+                "like_count": row.get("like_count"),
+                "comment_count": row.get("comment_count"),
+                "share_count": row.get("share_count"),
+                "hashtags": row.get("hashtags") or [],
+            }
             report = await loop.run_in_executor(
-                None, generate_violation_report, post_data, policies_text, verdict
+                None,
+                generate_violation_report,
+                post_data,
+                report_policies,
+                verdict,
+                report_metadata,
             )
             flagged_row = _build_flagged_row(row, post_data, verdict, report)
             await repository.upsert_flagged_post(flagged_row)

@@ -19,23 +19,23 @@ campaigns:
     daily_target: 1000
     enabled: true
 
-  # Instagram campaign - hashtags/profiles only; relevance filter removes broad hits
-  - platform: instagram
-    topic: albania_political
-    country: AL
-    seeds:
-      - "#jaredkushner"
-      - "#kushner"
-      - "#ivankatrump"
-      - "#sazan"
-      - "#edirama"
-      - "#protesta"
-      - "https://www.instagram.com/topchannelalb/"
-      - "https://www.instagram.com/tvklan.al/"
-      - "https://www.instagram.com/a2cnn/"
-      - "https://www.instagram.com/euronews.al/"
-    daily_target: 1000
-    enabled: true
+  # # Instagram campaign - hashtags/profiles only; relevance filter removes broad hits
+  # - platform: instagram
+  #   topic: albania_political
+  #   country: AL
+  #   seeds:
+  #     - "#jaredkushner"
+  #     - "#kushner"
+  #     - "#ivankatrump"
+  #     - "#sazan"
+  #     - "#edirama"
+  #     - "#protesta"
+  #     - "https://www.instagram.com/topchannelalb/"
+  #     - "https://www.instagram.com/tvklan.al/"
+  #     - "https://www.instagram.com/a2cnn/"
+  #     - "https://www.instagram.com/euronews.al/"
+  #   daily_target: 1000
+  #   enabled: true
 
   # Facebook campaign - broad keyword query for F60Kx7YJNOmKmqQm3
   - platform: facebook
@@ -81,11 +81,11 @@ campaigns:
     daily_target: 500
     enabled: true
 
-  # Reddit campaign - r/albania plus search terms
-  - platform: reddit
-    topic: albania_political
-    country: AL
-    seeds:
-      - "rama, protests, kushner, trump, israel, albania"
-    daily_target: 100
-    enabled: true
+  # # Reddit campaign - r/albania plus search terms
+  # - platform: reddit
+  #   topic: albania_political
+  #   country: AL
+  #   seeds:
+  #     - "rama, protests, kushner, trump, israel, albania"
+  #   daily_target: 100
+  #   enabled: true

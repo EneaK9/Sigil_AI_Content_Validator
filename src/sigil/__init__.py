@@ -2,7 +2,9 @@
 
 A single installable package exposing:
   * ``sigil`` CLI (validate / report / stats / scrape)
-  * ``sigil-scheduler`` long-running runner + collector + status server
+  * ``sigil-scheduler`` long-running runner + collector + validator + status loops
+    (select a subset with ``--only``)
+  * ``sigil-validator`` shortcut for ``sigil-scheduler --only validator``
   * ``sigil-migrate`` SQL migration runner
 """
 

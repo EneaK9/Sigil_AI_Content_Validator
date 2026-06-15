@@ -16,6 +16,7 @@ Provider selection mirrors ``sigil.validation.judge``: OpenAI is used when
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 import anthropic
@@ -26,29 +27,73 @@ from sigil.validation.judge import _parse_model_json
 from sigil.validation.models import JudgmentError, PostData, Verdict
 
 
-REPORT_SYSTEM_PROMPT = """You are a content-policy prosecutor. A first-pass audit has \
-already determined that the post below is a CLEAR violation of the platform's policies. \
-Your job is to build the formal case for removal.
+REPORT_SYSTEM_PROMPT = """You are a relentless Trust & Safety PROSECUTOR. A first-pass audit \
+has ALREADY established that the post below is a CLEAR violation. That finding is final and is \
+NOT yours to revisit. Your one and only job is to build the most aggressive, rigorous, and \
+damning submission-ready case for the post's removal.
 
-You are given the post, the platform's full Terms of Service and Community Guidelines, \
-and the specific violations already found. Produce a rigorous, citation-backed report.
+## PROSECUTORIAL STANCE (NON-NEGOTIABLE)
+- You ALWAYS assume the worst, most harmful interpretation of the content. Adversarial reading \
+is mandatory.
+- You NEVER defend, excuse, soften, "both-sides", contextualize away, or exonerate the post.
+- You NEVER conclude the post is acceptable, "no violation", a "false positive", "legitimate \
+journalism", "ordinary criticism", or that it should not be removed. Those conclusions are \
+forbidden and out of scope.
+- There IS a violation. Your task is to surface, name, and prove it - not to question it.
+- "It's just news / business reporting / political criticism / a joke / asking questions / \
+allegedly" is NOT a defense. Coded language, dog whistles, and subtext COUNT and must be \
+exposed and prosecuted. Intent is irrelevant; impact and the worst reasonable reading govern.
+- Surface the hateful subtext, the dog whistles, the tropes, the targeting, and the real-world \
+harm even when the surface text appears neutral. Treat euphemism and "plausible deniability" \
+as aggravating factors, not mitigating ones.
 
-## RULES
-1. Return ONLY raw JSON. No markdown fences, no preamble. The first character must be \
-'{' and the last must be '}'.
-2. Ground every claim in the provided policy text. Quote exact ToS sections and \
-Community Guideline lines. Never invent policy text that is not present.
-3. Cross-reference how the Terms of Service incorporate the Community Guidelines, and \
-map each violating element of the post to the specific section(s) it breaches.
-4. Be precise, formal, and damning. This report will be submitted to the platform's \
-Trust & Safety team.
+You are given the post (with reach metadata), the platform's full Terms of Service and \
+Community Guidelines (every line prefixed with its number as "N | text"), and the first-pass \
+findings.
+
+## NON-NEGOTIABLE OUTPUT RULES
+1. Return ONLY raw JSON. No markdown fences, no preamble. First character '{', last '}'.
+2. Cite EXACT line numbers from the numbered policy text for every policy quote, e.g. \
+"Community Guidelines, 'Hate Speech', line 16". Quote policy text VERBATIM. Never invent or \
+paraphrase policy text, and never cite a line number that is not present.
+3. Be EXHAUSTIVE. Identify every distinct policy category the post breaches (hate speech, \
+violent/criminal behavior, harassment, misinformation, dangerous orgs, etc.) - not just the \
+most obvious one. Map each violating element of the post to ALL sections it breaches. Charge \
+everything that can plausibly be charged.
+4. Explain the incorporation chain: how the Terms of Service bind the user to the Community \
+Guidelines (cite the specific ToS section + line), so a guideline breach is also a ToS breach.
+5. Write at the length and depth of a professional legal complaint. Terse output is a failure. \
+Each field below must be thorough and self-contained.
+6. Every field MUST be FINAL and submission-ready. NEVER emit placeholder / fill-in-the-blank \
+tokens of ANY kind - no square-bracket placeholders ('[Reporter]', '[Your Name]', \
+'[Current Date]', '[Date]', '[Position]'), no 'FROM:'/'DATE:' header lines, and no blank \
+signature. Use ONLY the concrete facts provided (post URL, author, posted date, reach). Do \
+NOT invent a reporter identity or a date. Any closing must be a neutral generic one (e.g. \
+"Submitted for Trust & Safety review") with no name or bracketed field.
+
+## FIELD REQUIREMENTS
+- category: single primary violation label (e.g. 'Antisemitism', 'Hate Speech', 'Harassment').
+- tos_cross_reference: for EACH violation category, a block of the form \
+"[Category] ToS Section X ('Title', line N) prohibits '<verbatim quote>' ... and incorporates \
+the Community Guidelines (line N) - the post breaches '<Guideline path>' (line N): '<verbatim quote>'". \
+Separate categories with '; '. Quote real, line-numbered policy text only.
+- violation_explanation: a thorough multi-sentence prosecutorial analysis of WHAT is wrong, \
+the specific tropes/dog-whistles/mechanisms at work, the concrete harm and who it targets, and \
+WHY it unambiguously violates policy under the worst reasonable reading. Reference the post's \
+own words. Do NOT hedge and do NOT argue any point in the post's favor.
+- report_text: a complete, FINAL formal abuse report to the platform's Trust & Safety team, \
+ready to submit with zero placeholders: a title/subject; post details (URL, author, posted \
+date, and reach as "Reach: N views, N likes, N comments" from the metadata); a numbered \
+section per violation category citing the verbatim Community Guideline AND Terms of Service \
+text WITH line numbers; and a closing demand for removal and account review. No \
+'FROM:'/'DATE:' block or blank signature.
 
 ## OUTPUT SCHEMA
 {
-  "category": "single primary violation label, e.g. 'Antisemitism', 'Hate Speech', 'Harassment'",
-  "tos_cross_reference": "detailed cross-reference mapping each violation to exact ToS sections AND the Community Guidelines they incorporate; quote the policy text verbatim; separate multiple violations with '; '",
-  "violation_explanation": "a thorough prose paragraph explaining what is wrong with the content, the harm it causes, and why it clearly violates policy",
-  "report_text": "a complete formal abuse report addressed to the platform's Trust & Safety team, including post details, each violation with its quoted policy references, and a request for removal"
+  "category": "string",
+  "tos_cross_reference": "string",
+  "violation_explanation": "string",
+  "report_text": "string"
 }"""
 
 
@@ -92,33 +137,91 @@ def _summarize_findings(verdict: Verdict) -> str:
     return "\n".join(lines)
 
 
+def _format_metadata(metadata: dict | None) -> str:
+    """Render post reach/metadata for the report prompt (best-effort)."""
+    if not metadata:
+        return "POST METADATA: (not available)"
+    posted_at = metadata.get("posted_at")
+    hashtags = metadata.get("hashtags") or []
+    if isinstance(hashtags, (list, tuple)):
+        hashtags = ", ".join(str(h) for h in hashtags)
+    parts = [
+        f"POSTED AT: {posted_at}" if posted_at else None,
+        f"VIEWS: {metadata.get('view_count')}"
+        if metadata.get("view_count") is not None
+        else None,
+        f"LIKES: {metadata.get('like_count')}"
+        if metadata.get("like_count") is not None
+        else None,
+        f"COMMENTS: {metadata.get('comment_count')}"
+        if metadata.get("comment_count") is not None
+        else None,
+        f"SHARES: {metadata.get('share_count')}"
+        if metadata.get("share_count") is not None
+        else None,
+        f"HASHTAGS: {hashtags}" if hashtags else None,
+    ]
+    return "POST METADATA:\n" + "\n".join(p for p in parts if p)
+
+
+# Detects fill-in-the-blank placeholders like [Reporter], [Current Date], [Your Name].
+_PLACEHOLDER_RE = re.compile(r"\[[^\]\n]{1,40}\]")
+
+_PLACEHOLDER_CORRECTION = (
+    "\n\nIMPORTANT CORRECTION: A previous draft contained fill-in-the-blank "
+    "placeholders. Reproduce ALL fields as FINAL, submission-ready text with NO "
+    "bracketed placeholders (no '[Reporter]', '[Current Date]', '[Your Name]', "
+    "etc.), NO 'FROM:'/'DATE:' header lines, and NO blank signature. Use only the "
+    "concrete facts provided."
+)
+
+
+def _has_placeholders(report: "ViolationReport") -> bool:
+    """True if any report field still contains a fill-in placeholder."""
+    for value in (
+        report.category,
+        report.tos_cross_reference,
+        report.violation_explanation,
+        report.report_text,
+    ):
+        if _PLACEHOLDER_RE.search(value or ""):
+            return True
+    return False
+
+
 def _build_report_prompt(
-    post: PostData, policies_text: str, verdict: Verdict
+    post: PostData,
+    policies_text: str,
+    verdict: Verdict,
+    metadata: dict | None = None,
+    extra_instruction: str = "",
 ) -> str:
     """Build the user prompt for the second-pass report generation."""
     findings = _summarize_findings(verdict)
-    return f"""PLATFORM: {post.platform}
+    return extra_instruction + f"""PLATFORM: {post.platform}
 
 POST URL: {post.url}
 POST AUTHOR: {post.author}
 POST TITLE: {post.title}
+{_format_metadata(metadata)}
 POST TEXT:
 ---
 {post.text}
 ---
 
-FIRST-PASS FINDINGS (already confirmed as a CLEAR violation):
+FIRST-PASS FINDINGS (already established as a CLEAR violation — prosecute, do not revisit):
 ---
 {findings}
 ---
 
-PLATFORM POLICIES (Community Guidelines + Terms of Service):
+PLATFORM POLICIES (Community Guidelines + Terms of Service; each line is prefixed \
+with its line number as "N | text" - cite these exact line numbers):
 ---
 {policies_text}
 ---
 
 Build the formal case. Return the JSON object described in the system prompt, \
-cross-referencing the exact policy sections quoted above."""
+cross-referencing the exact line-numbered policy sections quoted above."""
 
 
 def _build_report(data: dict) -> ViolationReport:
@@ -132,7 +235,11 @@ def _build_report(data: dict) -> ViolationReport:
 
 
 def _generate_with_openai(
-    post: PostData, policies_text: str, verdict: Verdict
+    post: PostData,
+    policies_text: str,
+    verdict: Verdict,
+    metadata: dict | None = None,
+    extra_instruction: str = "",
 ) -> ViolationReport:
     settings = get_settings()
     api_key = settings.openai_api_key
@@ -142,13 +249,15 @@ def _generate_with_openai(
             "Create a .env file with: OPENAI_API_KEY=your-key-here"
         )
 
-    prompt_text = _build_report_prompt(post, policies_text, verdict)
+    prompt_text = _build_report_prompt(
+        post, policies_text, verdict, metadata, extra_instruction
+    )
     client = OpenAI(api_key=api_key)
 
     try:
         response = client.chat.completions.create(
-            model=settings.openai_model,
-            max_tokens=settings.openai_max_tokens,
+            model=settings.report_openai_model,
+            max_tokens=settings.report_max_tokens,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": REPORT_SYSTEM_PROMPT},
@@ -166,7 +275,11 @@ def _generate_with_openai(
 
 
 def _generate_with_claude(
-    post: PostData, policies_text: str, verdict: Verdict
+    post: PostData,
+    policies_text: str,
+    verdict: Verdict,
+    metadata: dict | None = None,
+    extra_instruction: str = "",
 ) -> ViolationReport:
     settings = get_settings()
     api_key = settings.anthropic_api_key
@@ -176,13 +289,15 @@ def _generate_with_claude(
             "Create a .env file with: ANTHROPIC_API_KEY=your-key-here"
         )
 
-    prompt_text = _build_report_prompt(post, policies_text, verdict)
+    prompt_text = _build_report_prompt(
+        post, policies_text, verdict, metadata, extra_instruction
+    )
     client = anthropic.Anthropic(api_key=api_key)
 
     try:
         response = client.messages.create(
-            model=settings.claude_model,
-            max_tokens=settings.claude_max_tokens,
+            model=settings.report_claude_model,
+            max_tokens=settings.report_max_tokens,
             system=REPORT_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt_text}],
         )
@@ -200,13 +315,21 @@ def generate_violation_report(
     post: PostData,
     policies_text: str,
     verdict: Verdict,
+    metadata: dict | None = None,
 ) -> ViolationReport:
     """Run the second-pass prosecutor to produce report-ready fields.
 
+    This pass runs ONLY on CLEAR_VIOLATION posts, so it uses the premium
+    ``report_*`` model + token budget (see ``Settings``). By default it prefers
+    Anthropic (Claude Opus) when an Anthropic key is present, so the expensive
+    model is reserved for flagged rows while the first-pass judge stays cheap.
+
     Args:
         post: The post that was judged CLEAR_VIOLATION.
-        policies_text: Concatenated platform policy markdown.
+        policies_text: Platform policy markdown (line-numbered for citations).
         verdict: The first-pass Verdict (its violations/warnings inform the report).
+        metadata: Optional post reach/metadata (views, likes, comments, posted_at,
+            hashtags) included in the prompt so the report can cite real reach.
 
     Returns:
         ViolationReport with category, tos_cross_reference, violation_explanation,
@@ -215,6 +338,25 @@ def generate_violation_report(
     Raises:
         JudgmentError: If the model call fails or returns invalid JSON.
     """
-    if get_settings().openai_api_key:
-        return _generate_with_openai(post, policies_text, verdict)
-    return _generate_with_claude(post, policies_text, verdict)
+    settings = get_settings()
+    # Premium model lives on Anthropic (Opus); prefer it for the report pass.
+    if settings.report_prefer_anthropic and settings.anthropic_api_key:
+        generate = _generate_with_claude
+    elif settings.openai_api_key:
+        generate = _generate_with_openai
+    elif settings.anthropic_api_key:
+        generate = _generate_with_claude
+    else:
+        raise JudgmentError(
+            "No LLM API key configured for report generation. Set ANTHROPIC_API_KEY "
+            "(recommended for the report pass) or OPENAI_API_KEY."
+        )
+
+    report = generate(post, policies_text, verdict, metadata)
+    # Guarantee final, submission-ready cells: if any fill-in placeholder slipped
+    # through, regenerate once with an explicit correction.
+    if _has_placeholders(report):
+        report = generate(
+            post, policies_text, verdict, metadata, _PLACEHOLDER_CORRECTION
+        )
+    return report

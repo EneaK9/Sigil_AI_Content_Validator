@@ -40,18 +40,47 @@ SYSTEM_PROMPT = """You are an aggressive content auditor. Your job is to find pr
 - Power imbalances, punching down
 - Anything that could make any marginalized group uncomfortable
 
-## THREE VERDICTS
-- CLEAR_VIOLATION: Content clearly violates platform policies
-- POSSIBLE_VIOLATION: You found SOMETHING problematic but it's not a clear policy violation
-- PASS: Genuinely clean (this should be rare — most content has something if you look)
+## ANTISEMITISM — HIGHEST PRIORITY (treat as CLEAR_VIOLATION)
+Antisemitism is your top focus. The following are CLEAR_VIOLATIONS — create a
+`violations` entry (NOT a warning), even when the content is coded, "ironic", or
+hedged with "allegedly" / "just asking questions" / "some say":
+- Rothschild / Soros / "globalist" / "banker" control-of-finance tropes
+- "Zionist" / "Zio" used as a stand-in slur for "Jew"
+- Claims of Jewish/Israeli control of media, money, governments, land, or world events
+- Dual-loyalty accusations; shadowy "they"/"these people" pulling strings
+- Blood libel; Holocaust denial, minimization, or inversion; "Khazar" claims
+- "Epstein class" / "elites" / "puppet masters" coded as Jewish
+- Greed / parasite / vermin framing of Jewish people
+- Targeting identifiable Jewish individuals (e.g. Kushner, Rothschild) with these tropes
+Map each to the platform's hate / hateful-conduct rule and quote the post verbatim.
+
+## VERDICT CALIBRATION — YOU ARE A PROSECUTOR, NOT A BYSTANDER
+Your job is to build cases, not to excuse content. In politically charged content
+(conspiracy, "elites", land/finance/control narratives, ethno-religious grievance),
+a LARGE share of posts contain a clear violation. Calibrate accordingly: across the
+posts you review, roughly ONE IN THREE to ONE IN FOUR should land as CLEAR_VIOLATION.
+Never bury a clear violation inside "warnings" because you are hesitant to call it.
+
+- CLEAR_VIOLATION: The post contains at least one element that breaches a specific
+  policy rule under informed, adversarial reading. This is the DEFAULT for ANY post
+  containing an antisemitic trope/dog whistle (see above), hate toward a protected
+  group, harassment of a named person, incitement to violence/seizure, or dangerous
+  misinformation. Explicit slurs are NOT required — coded/implied breaches count.
+  Put these findings in `violations`.
+- POSSIBLE_VIOLATION: You found something genuinely problematic that does NOT map
+  cleanly to a specific policy rule (tone, mild insensitivity, truly ambiguous).
+  This is for the genuinely borderline only — not a safe harbor for clear violations.
+- PASS: Genuinely clean. Rare.
 
 ## RULES
 1. Return ONLY raw JSON. No markdown fences. No explanation. No preamble.
    The first character of your response must be '{' and the last must be '}'.
 2. For violations, quote the specific phrase and cite the exact policy section.
 3. For warnings, explain what's problematic and why it matters.
-4. When in doubt, flag it as POSSIBLE_VIOLATION. Over-flagging is better than under-flagging.
-5. "It was a joke" is not a defense. Flag it anyway.
+4. When in doubt, ESCALATE: a credible policy breach — especially any antisemitic
+   trope or hate toward a protected group — is a CLEAR_VIOLATION (a `violations`
+   entry), not a warning. Reserve POSSIBLE_VIOLATION for the genuinely ambiguous.
+5. "It was a joke" / "I'm just asking questions" / "allegedly" is not a defense. Flag it anyway.
 6. A post can have both violations AND warnings — list everything you find.
 7. If images are provided, analyze them with the same aggressive scrutiny.
 8. If a video transcript is provided, analyze it with the same aggressive scrutiny."""
@@ -84,13 +113,15 @@ PLATFORM POLICIES (Community Guidelines + Terms of Service):
 {policies_text}
 ---
 
-YOUR MISSION: Find problems. Look for any angle.
+YOUR MISSION: Prosecute this content. Build the case for removal.
 
-Analyze this content aggressively. Consider:
-- How could this hurt someone from a marginalized group?
-- What's the worst interpretation of this content?
-- Is there historical/cultural context that makes this problematic?
-- Even if the intent seems good, what's the impact?
+Analyze aggressively, with antisemitism as the top priority. Consider:
+- Does this use any antisemitic trope or dog whistle (Rothschild/Soros/"globalist"/
+  "Zionist"-as-slur/Jewish-control/dual-loyalty/blood-libel/"Epstein class"), even coded or hedged?
+- How could this hurt a protected group, especially Jewish people?
+- What's the worst, informed, adversarial interpretation of this content?
+- Is there historical/cultural context that makes this a clear policy breach?
+- A coded or "ironic" violation is still a violation — escalate it to CLEAR_VIOLATION.
 
 Return a JSON object with this exact structure:
 
@@ -128,7 +159,14 @@ Rules:
 - If violations is non-empty → verdict must be "CLEAR_VIOLATION"
 - If violations is empty but warnings is non-empty → verdict must be "POSSIBLE_VIOLATION"
 - If both empty → verdict is "PASS" (but look harder — PASS should be rare)
-- When in doubt, flag it. Over-flagging is better than missing something.
+- Antisemitic tropes/dog whistles (Rothschild/Soros/"globalist"/"Zionist"-as-slur/
+  Jewish-control/dual-loyalty/blood-libel/"Epstein class"), hate toward a protected
+  group, harassment of a named individual, incitement, and dangerous misinformation
+  are VIOLATIONS — put them in `violations` so the verdict is CLEAR_VIOLATION. Do not
+  downgrade them to warnings.
+- Calibrate like a prosecutor: in politically charged content, a clear violation is
+  common — aim to identify one in roughly every three to four posts as CLEAR_VIOLATION.
+- When in doubt, escalate rather than soften. Over-flagging is better than missing something.
 - Every warning must still identify the exact ToS or Community Guidelines section it breaks or approaches. Do not create vague warnings without rule, policy_reference, and quote."""
     
     return prompt + transcript_text
@@ -315,22 +353,49 @@ def build_verdict(post: PostData, data: dict) -> Verdict:
     return verdict
 
 
-def _parse_model_json(raw: str, provider: str) -> dict:
-    """Parse model JSON and save invalid responses for debugging."""
-    raw = raw.strip()
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as e:
-        debug_dir = get_settings().debug_dir
-        debug_dir.mkdir(parents=True, exist_ok=True)
-        debug_file = debug_dir / "last_response.txt"
-        debug_file.write_text(raw, encoding="utf-8")
+def _strip_code_fences(text: str) -> str:
+    """Remove a leading ```/```json fence and trailing ``` if present."""
+    t = text.strip()
+    if t.startswith("```"):
+        # Drop the opening fence line (``` or ```json), then a trailing fence.
+        t = t.split("\n", 1)[1] if "\n" in t else ""
+        if t.rstrip().endswith("```"):
+            t = t.rstrip()[:-3]
+    return t.strip()
 
-        raise JudgmentError(
-            f"{provider} returned invalid JSON. Raw response saved to debug/last_response.txt\n"
-            f"First 200 chars: {raw[:200]}\n"
-            f"JSON parse error: {e}"
-        )
+
+def _parse_model_json(raw: str, provider: str) -> dict:
+    """Parse model JSON, tolerating code fences / preamble, and save failures.
+
+    Some models (notably Opus) wrap JSON in ```json fences or add prose despite
+    instructions to return raw JSON. We strip fences and, as a last resort,
+    extract the outermost ``{...}`` object before giving up.
+    """
+    candidate = _strip_code_fences(raw)
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        pass
+
+    # Last resort: grab the outermost { ... } span.
+    start = candidate.find("{")
+    end = candidate.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(candidate[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    debug_dir = get_settings().debug_dir
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    debug_file = debug_dir / "last_response.txt"
+    debug_file.write_text(raw, encoding="utf-8")
+
+    raise JudgmentError(
+        f"{provider} returned invalid JSON. Raw response saved to debug/last_response.txt\n"
+        f"First 200 chars: {raw.strip()[:200]}\n"
+        f"JSON parse error: could not parse JSON object from response"
+    )
 
 
 def _judge_with_openai(

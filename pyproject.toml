@@ -39,6 +39,7 @@ dev = [
 [project.scripts]
 sigil = "sigil.cli:main"
 sigil-scheduler = "sigil.scraper.orchestration.scheduler:main"
+sigil-validator = "sigil.scraper.orchestration.scheduler:validator_main"
 sigil-migrate = "sigil.migrate:main"
 
 [tool.setuptools]

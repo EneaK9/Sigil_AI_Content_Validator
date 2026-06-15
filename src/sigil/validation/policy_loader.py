@@ -5,7 +5,18 @@ from sigil.config import PLATFORM_POLICY_FILES, get_settings
 from sigil.validation.models import PolicyNotFoundError
 
 
-def load_policies(platform: str) -> str:
+def _number_lines(text: str) -> str:
+    """Prefix each line with a right-aligned line number (restarts per document).
+
+    This lets the report prosecutor cite exact policy lines (e.g. "line 16")
+    the way a human compliance analyst would.
+    """
+    return "\n".join(
+        f"{i:>4} | {line}" for i, line in enumerate(text.splitlines(), start=1)
+    )
+
+
+def load_policies(platform: str, *, numbered: bool = False) -> str:
     """
     Load all policy Markdown files for the given platform.
     
@@ -13,6 +24,8 @@ def load_policies(platform: str) -> str:
     
     Args:
         platform: Platform name (reddit, x, tiktok, facebook, instagram)
+        numbered: When True, prefix every policy line with its line number so a
+            consumer (the report generator) can cite exact lines per document.
         
     Returns:
         Concatenated policy text with section headers
@@ -47,7 +60,8 @@ def load_policies(platform: str) -> str:
         
         # Create section header from filename
         section_name = filename.replace("_", " ").replace(".md", "").title()
-        sections.append(f"=== {section_name} ===\n\n{content}")
+        body = _number_lines(content) if numbered else content
+        sections.append(f"=== {section_name} ===\n\n{body}")
     
     return "\n\n".join(sections)
 

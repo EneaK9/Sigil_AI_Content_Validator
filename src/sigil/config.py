@@ -61,6 +61,16 @@ class Settings(BaseSettings):
     openai_model: str = Field("gpt-4o", alias="OPENAI_MODEL")
     openai_max_tokens: int = Field(2000, alias="OPENAI_MAX_TOKENS")
 
+    # --- Report generator (second pass; premium model, flagged posts ONLY) -
+    # Only CLEAR_VIOLATION posts run this pass, so a stronger/pricier model is
+    # affordable here. ``report_max_tokens`` bounds the spend per flagged row.
+    report_prefer_anthropic: bool = Field(True, alias="REPORT_PREFER_ANTHROPIC")
+    report_claude_model: str = Field(
+        "claude-opus-4-5-20251101", alias="REPORT_CLAUDE_MODEL"
+    )
+    report_openai_model: str = Field("gpt-4o", alias="REPORT_OPENAI_MODEL")
+    report_max_tokens: int = Field(6000, alias="REPORT_MAX_TOKENS")
+
     # --- Multimodal limits -----------------------------------------------
     preferred_max_images: int = Field(4, alias="PREFERRED_MAX_IMAGES")
     max_image_size_bytes: int = Field(5 * 1024 * 1024, alias="MAX_IMAGE_SIZE_BYTES")
@@ -92,6 +102,12 @@ class Settings(BaseSettings):
     runner_interval_secs: int = Field(900, alias="RUNNER_INTERVAL_SECS")
     collector_interval_secs: int = Field(60, alias="COLLECTOR_INTERVAL_SECS")
     results_limit_per_run: int = Field(1000, alias="RESULTS_LIMIT_PER_RUN")
+
+    # --- Validation loop (runs inside the scheduler) ---------------------
+    validation_enabled: bool = Field(True, alias="VALIDATION_ENABLED")
+    validation_interval_secs: int = Field(120, alias="VALIDATION_INTERVAL_SECS")
+    validation_batch_limit: int = Field(100, alias="VALIDATION_BATCH_LIMIT")
+    validation_concurrency: int = Field(5, alias="VALIDATION_CONCURRENCY")
     max_run_retries: int = Field(3, alias="MAX_RUN_RETRIES")
     actor_max_results_per_run: int = Field(5000, alias="ACTOR_MAX_RESULTS_PER_RUN")
     est_cost_per_run_usd: float = Field(1.0, alias="EST_COST_PER_RUN_USD")
