@@ -114,15 +114,27 @@ def _check_x(url: str, timeout: int) -> AvailabilityResult:
 
     status = _classify_status_code(resp.status_code)
     detail = f"X API HTTP {resp.status_code}."
-    if resp.status_code == 200:
-        # A 200 with an errors array (and no data) means the tweet is gone/withheld.
-        try:
-            body = resp.json()
-        except ValueError:
-            body = {}
-        if "data" not in body and body.get("errors"):
-            status = AvailabilityStatus.REMOVED
-            detail = f"Tweet unavailable: {body['errors'][0].get('detail', 'not found')}"
+
+    # Inspect the errors array (present on both 200-with-errors and some 403s).
+    # A suspended author is a takedown at the account level, distinct from a
+    # single deleted tweet — surface it as ACCOUNT_BANNED.
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {}
+    errors = body.get("errors") or []
+    err_text = " ".join(
+        f"{e.get('title', '')} {e.get('detail', '')}" for e in errors
+    ).lower()
+
+    if "suspend" in err_text:
+        status = AvailabilityStatus.ACCOUNT_BANNED
+        detail = f"Author suspended: {errors[0].get('detail', 'account banned')}"
+    elif resp.status_code == 200 and "data" not in body and errors:
+        # 200 with an errors array (and no data) means the tweet is gone/withheld.
+        status = AvailabilityStatus.REMOVED
+        detail = f"Tweet unavailable: {errors[0].get('detail', 'not found')}"
+
     return AvailabilityResult(
         url=url, platform="x", status=status, http_status=resp.status_code, detail=detail,
     )

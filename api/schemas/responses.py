@@ -57,7 +57,7 @@ class AvailabilityResponse(BaseModel):
     """Reachability of a single re-checked post (report-result monitoring)."""
     url: str = Field(..., description="The post URL that was re-checked")
     platform: str = Field(..., description="Detected platform")
-    status: Literal["live", "removed", "restricted", "unknown"] = Field(
+    status: Literal["live", "removed", "account_banned", "restricted", "unknown"] = Field(
         ..., description="Observed reachability — proxy for the platform's action"
     )
     http_status: Optional[int] = Field(None, description="HTTP status observed, if any")

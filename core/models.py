@@ -121,10 +121,11 @@ class Verdict:
 
 class AvailabilityStatus(str, Enum):
     """Observed reachability of a previously-seen post on re-crawl."""
-    LIVE = "live"              # still reachable (HTTP 200) -> no action taken (yet)
-    REMOVED = "removed"        # 404/410 -> deleted or taken down
-    RESTRICTED = "restricted"  # 403 -> private, withheld, or quarantined
-    UNKNOWN = "unknown"        # couldn't determine (network error, no API token, unsupported)
+    LIVE = "live"                      # still reachable (HTTP 200) -> no action taken (yet)
+    REMOVED = "removed"                # 404/410 -> deleted or taken down
+    ACCOUNT_BANNED = "account_banned"  # author's account suspended/banned -> taken down
+    RESTRICTED = "restricted"          # 403 -> private, withheld, or quarantined
+    UNKNOWN = "unknown"                # couldn't determine (network error, no API token, unsupported)
 
 
 @dataclass
