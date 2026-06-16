@@ -3,6 +3,7 @@ Data models and custom exceptions for PolicyGuard.
 """
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Optional, TYPE_CHECKING
 import json
 
@@ -109,3 +110,40 @@ class Verdict:
     def to_json(self) -> str:
         """Returns pretty-printed JSON string."""
         return json.dumps(self.to_dict(), indent=2)
+
+
+# Report-result monitoring
+#
+# Detection tells us a post violates policy. Monitoring tells us what happened to
+# it afterwards. We can't read a platform's internal moderation decision, but we
+# CAN re-visit the post and observe whether it's still reachable — which is the
+# best available proxy for "the action taken on a reported post."
+
+class AvailabilityStatus(str, Enum):
+    """Observed reachability of a previously-seen post on re-crawl."""
+    LIVE = "live"              # still reachable (HTTP 200) -> no action taken (yet)
+    REMOVED = "removed"        # 404/410 -> deleted or taken down
+    RESTRICTED = "restricted"  # 403 -> private, withheld, or quarantined
+    UNKNOWN = "unknown"        # couldn't determine (network error, no API token, unsupported)
+
+
+@dataclass
+class AvailabilityResult:
+    """Result of re-checking whether a post is still live.
+
+    This is the raw signal the dashboard maps onto an evidence item's report
+    status (removed / restricted / still_live). It does NOT re-run policy
+    judgment — it only answers "is this post still up?".
+    """
+    url: str
+    platform: str
+    status: AvailabilityStatus
+    http_status: Optional[int] = None   # the HTTP code we observed, when there was one
+    detail: str = ""                    # human-readable note (e.g. "Tweet not found (404)")
+    checked_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_dict(self) -> dict:
+        """Returns a fully serializable dict for JSON output."""
+        result = asdict(self)
+        result["status"] = self.status.value
+        return result

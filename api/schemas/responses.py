@@ -53,6 +53,25 @@ class JobResponse(BaseModel):
     completed_at: Optional[str] = Field(None, description="ISO 8601 timestamp of completion")
 
 
+class AvailabilityResponse(BaseModel):
+    """Reachability of a single re-checked post (report-result monitoring)."""
+    url: str = Field(..., description="The post URL that was re-checked")
+    platform: str = Field(..., description="Detected platform")
+    status: Literal["live", "removed", "restricted", "unknown"] = Field(
+        ..., description="Observed reachability — proxy for the platform's action"
+    )
+    http_status: Optional[int] = Field(None, description="HTTP status observed, if any")
+    detail: str = Field("", description="Human-readable note about the observation")
+    checked_at: str = Field(..., description="ISO 8601 timestamp of the re-check")
+
+
+class RecheckResponse(BaseModel):
+    """Batch result for re-checking multiple posts."""
+    results: List[AvailabilityResponse] = Field(
+        default_factory=list, description="One availability result per requested URL"
+    )
+
+
 class HealthResponse(BaseModel):
     """Health check response."""
     status: Literal["healthy", "unhealthy"] = Field(..., description="Service health status")
