@@ -65,7 +65,12 @@ class RecheckInput(BaseModel):
     Used by report-result monitoring: given the URLs of flagged posts, re-visit
     each and report whether it is still live, removed, or restricted.
     """
-    urls: List[str] = Field(..., description="Post URLs to re-check", min_length=1)
+    urls: List[str] = Field(
+        ...,
+        description="Post URLs to re-check",
+        min_length=1,
+        max_length=100,  # bound the batch so a single request can't fan out unboundedly
+    )
 
     model_config = {
         "json_schema_extra": {

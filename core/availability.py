@@ -14,7 +14,11 @@ media, or parse content. It only maps the response status to an
 AvailabilityStatus. The dashboard then maps that onto an evidence item's report
 status (removed / restricted / still_live).
 """
+import ipaddress
+import os
 import re
+import socket
+from urllib.parse import urlparse
 
 import requests
 
@@ -22,15 +26,55 @@ from config import REDDIT_USER_AGENT, SCRAPER_USER_AGENT
 from core.detector import detect_platform
 from core.models import AvailabilityResult, AvailabilityStatus
 
-# X needs its own token to query authoritatively; import lazily inside the helper.
-import os
+# The only hosts we will ever fetch, per detected platform. detect_platform uses
+# substring matching, so on its own a crafted URL (e.g. an internal IP with
+# "x.com" in the path) could slip through and turn /recheck into an SSRF
+# primitive. This allowlist closes that: we only fetch real platform domains.
+_PLATFORM_HOST_SUFFIXES = {
+    "x": ("x.com", "twitter.com", "api.twitter.com"),
+    "reddit": ("reddit.com",),
+    "tiktok": ("tiktok.com",),
+}
+
+
+def _resolves_to_public_ip(hostname: str) -> bool:
+    """Defense in depth: reject hosts that resolve to private/loopback/link-local IPs."""
+    try:
+        infos = socket.getaddrinfo(hostname, None)
+    except OSError:
+        return False
+    for *_, sockaddr in infos:
+        try:
+            ip = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            return False
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False
+    return True
+
+
+def _is_allowed_platform_url(url: str, platform: str) -> bool:
+    """True only if `url`'s host is a real public host for the detected platform."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return False
+    host = parsed.hostname.lower()
+    allowed = _PLATFORM_HOST_SUFFIXES.get(platform, ())
+    if not any(host == d or host.endswith(f".{d}") for d in allowed):
+        return False
+    return _resolves_to_public_ip(host)
 
 
 def _classify_status_code(code: int) -> AvailabilityStatus:
-    """Map an HTTP status code to a reachability verdict."""
+    """Map an HTTP status code to a reachability verdict.
+
+    Note 401 is intentionally NOT mapped to RESTRICTED: a 401 means our own
+    credentials are bad (e.g. an expired bearer token), not that the post was
+    restricted — treating it as a moderation outcome would be a false signal.
+    """
     if code in (404, 410):
         return AvailabilityStatus.REMOVED
-    if code in (401, 403):
+    if code == 403:
         return AvailabilityStatus.RESTRICTED
     if code == 200:
         return AvailabilityStatus.LIVE
@@ -61,6 +105,13 @@ def check_availability(url: str, timeout: int = 10) -> AvailabilityResult:
             platform=platform,
             status=AvailabilityStatus.UNKNOWN,
             detail=f"{platform} cannot be auto-checked (authentication wall).",
+        )
+
+    # SSRF guard: only ever make outbound requests to genuine platform hosts.
+    if not _is_allowed_platform_url(url, platform):
+        return AvailabilityResult(
+            url=url, platform=platform, status=AvailabilityStatus.UNKNOWN,
+            detail="URL host is not a valid public host for the detected platform.",
         )
 
     if platform == "x":
@@ -111,6 +162,13 @@ def _check_x(url: str, timeout: int) -> AvailabilityResult:
     resp, err = _request(f"https://api.twitter.com/2/tweets/{tweet_id}", headers, timeout)
     if resp is None:
         return AvailabilityResult(url=url, platform="x", status=AvailabilityStatus.UNKNOWN, detail=err)
+
+    if resp.status_code == 401:
+        # Auth failure on our side — not a moderation outcome for this tweet.
+        return AvailabilityResult(
+            url=url, platform="x", status=AvailabilityStatus.UNKNOWN, http_status=401,
+            detail="X API unauthorized (invalid/expired X_BEARER_TOKEN).",
+        )
 
     status = _classify_status_code(resp.status_code)
     detail = f"X API HTTP {resp.status_code}."

@@ -18,6 +18,10 @@ logger = logging.getLogger("policyguard.api.monitor")
 
 router = APIRouter()
 
+# Cap how many blocking re-checks run at once so a full batch can't exhaust the
+# default thread pool (batch size itself is bounded by RecheckInput.max_length).
+MAX_RECHECK_CONCURRENCY = 20
+
 
 @router.post(
     "/recheck",
@@ -35,10 +39,15 @@ async def recheck(recheck_input: RecheckInput) -> RecheckResponse:
     logger.info(f"[RECHECK] Re-checking availability of {len(urls)} post(s)")
 
     loop = asyncio.get_event_loop()
-    # check_availability is blocking (requests); fan out across the thread pool.
-    results = await asyncio.gather(
-        *(loop.run_in_executor(None, check_availability, url) for url in urls)
-    )
+    sem = asyncio.Semaphore(MAX_RECHECK_CONCURRENCY)
+
+    async def _run(u: str):
+        # check_availability is blocking (requests); fan out across the thread
+        # pool, but bounded so we never schedule more than the semaphore allows.
+        async with sem:
+            return await loop.run_in_executor(None, check_availability, u)
+
+    results = await asyncio.gather(*(_run(u) for u in urls))
 
     for r in results:
         logger.info(f"[RECHECK] {r.platform} {r.status.value} <- {r.url}")
