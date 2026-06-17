@@ -1,41 +1,31 @@
-"""Relevance and deduplication helpers for Albania/Kushner/Trump scrapes."""
+"""Relevance and deduplication helpers for client/topic scrapes."""
 
 from __future__ import annotations
 
 import re
 from urllib.parse import urlsplit, urlunsplit
 
-ALBANIA_RE = re.compile(
-    r"\b(albania|albanian|shqip(?:e|eria|ëria)?|tirana|tiran[ëe]|"
-    r"vlora|vlor[ëe]|sazan|dh[ëe]rmi|rama|edirama)\b",
-    re.IGNORECASE,
-)
-TRUMP_FAMILY_RE = re.compile(r"\b(trump|kushner|ivanka|jared)\b", re.IGNORECASE)
-STORY_RE = re.compile(
-    r"\b(protest\w*|demonstrat\w*|resort|island|sazan|vlora|vlor[ëe]|"
-    r"development|project|invest\w*|billion|construction|bulldozer\w*|"
-    r"protected|park)\b",
-    re.IGNORECASE,
-)
+from scraper.relevance_profiles import profile_for
+
+DEFAULT_CLIENT = "sigil"
+DEFAULT_TOPIC = "albania_political"
 
 
-def post_relevance_tier(post: dict) -> str:
-    """Classify whether a post is relevant to the Albania/Trump-family story."""
+def post_relevance_tier(post: dict, *, client: str | None = None, topic: str | None = None) -> str:
+    """Classify whether a post is relevant to the given client/topic."""
+    resolved_client = (client or post.get("client") or DEFAULT_CLIENT)
+    resolved_topic = (topic or post.get("topic") or DEFAULT_TOPIC)
     text = _searchable_text(post)
-    has_albania = bool(ALBANIA_RE.search(text))
-    has_trump_family = bool(TRUMP_FAMILY_RE.search(text))
-    has_story = bool(STORY_RE.search(text))
-
-    if has_albania and has_trump_family and has_story:
-        return "core_story"
-    if has_albania and has_trump_family:
-        return "broader_albania_trump_kushner"
-    return "not_relevant"
+    profile = profile_for(str(resolved_client), str(resolved_topic))
+    if profile is None:
+        # If we don't have a profile, do not filter anything out.
+        return "unknown_profile"
+    return "relevant" if profile.is_relevant(text) else "not_relevant"
 
 
-def is_relevant_post(post: dict) -> bool:
-    """Return True if the post should be kept for this specific investigation."""
-    return post_relevance_tier(post) != "not_relevant"
+def is_relevant_post(post: dict, *, client: str | None = None, topic: str | None = None) -> bool:
+    """Return True if the post should be kept for this client/topic."""
+    return post_relevance_tier(post, client=client, topic=topic) != "not_relevant"
 
 
 def dedupe_key(post: dict) -> str:
@@ -51,7 +41,12 @@ def dedupe_key(post: dict) -> str:
     return f"{platform}:unknown:{hash(_searchable_text(post))}"
 
 
-def filter_and_dedupe_posts(posts: list[dict]) -> tuple[list[dict], dict[str, int]]:
+def filter_and_dedupe_posts(
+    posts: list[dict],
+    *,
+    client: str | None = None,
+    topic: str | None = None,
+) -> tuple[list[dict], dict[str, int]]:
     """Remove irrelevant and duplicate posts, returning kept posts and stats."""
     kept: list[dict] = []
     seen: set[str] = set()
@@ -63,7 +58,7 @@ def filter_and_dedupe_posts(posts: list[dict]) -> tuple[list[dict], dict[str, in
     }
 
     for post in posts:
-        tier = post_relevance_tier(post)
+        tier = post_relevance_tier(post, client=client, topic=topic)
         post["relevance_tier"] = tier
         if tier == "not_relevant":
             stats["irrelevant_count"] += 1

@@ -51,8 +51,9 @@ class TwitterScraper(PlatformScraper):
 
         run_input: dict[str, Any] = {
             "maxItems": settings.results_limit_per_run,
-            "sort": "Latest",
+            "sort": "Top",
             "includeSearchTerms": True,
+            "proxyConfiguration": {"useApifyProxy": True},
         }
         if start_urls:
             run_input["startUrls"] = start_urls

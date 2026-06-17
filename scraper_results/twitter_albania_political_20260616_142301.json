@@ -1,0 +1,31 @@
+{
+  "metadata": {
+    "platform": "twitter",
+    "topic": "albania_political",
+    "scraped_at": "2026-06-16T14:23:01.277424+00:00",
+    "total_posts": 0,
+    "seeds": [
+      "Jared Kushner Albania protest",
+      "Kushner Sazan Albania",
+      "Trump Kushner Albania resort",
+      "Ivanka Trump Albania resort",
+      "Edi Rama Kushner Sazan",
+      "Albania protest Kushner resort",
+      "Sazan Island Kushner protest",
+      "Kushner Shqiperi protesta"
+    ],
+    "country": "AL",
+    "apify_run_id": "6ktVUHaCigS5ZtI6O",
+    "apify_dataset_id": "0sJqL5oMaSNNVwg49",
+    "cost_usd": 0.128,
+    "raw_items_count": 0,
+    "normalized_count": 0,
+    "saved_count": 0,
+    "failed_count": 0,
+    "input_count": 0,
+    "irrelevant_count": 0,
+    "duplicate_count": 0,
+    "kept_count": 0
+  },
+  "posts": []
+}

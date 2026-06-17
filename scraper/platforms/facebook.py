@@ -59,22 +59,31 @@ class FacebookScraper(PlatformScraper):
         query_string = ",".join(keywords) if keywords else "Albania protest Kushner"
         
         today = datetime.now()
-        start_date = (today - timedelta(days=365)).strftime("%Y-%m-%d")
+        # Kevin campaign is a current-events story; bias toward recent posts.
+        if getattr(campaign, "client", "sigil") == "kevin":
+            start_date = (today - timedelta(days=120)).strftime("%Y-%m-%d")
+        else:
+            start_date = (today - timedelta(days=365)).strftime("%Y-%m-%d")
         end_date = today.strftime("%Y-%m-%d")
         
         location = campaign.country if campaign.country else "Albania"
         if location == "AL":
             location = "Albania"
+        if location in {"US", "USA"}:
+            location = "United States"
         
         run_input: dict[str, Any] = {
             "query": query_string,
             "max_results": min(settings.results_limit_per_run, 1000),
             "start_date": start_date,
             "end_date": end_date,
-            "location_uid": location,
             "search_type": "posts",
-            "recent_posts": False,
+            "recent_posts": True if getattr(campaign, "client", "sigil") == "kevin" else False,
         }
+
+        # The actor can be overly restrictive with location filtering for US-wide stories.
+        if getattr(campaign, "client", "sigil") != "kevin":
+            run_input["location_uid"] = location
         
         return run_input
 

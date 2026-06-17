@@ -47,6 +47,7 @@ scrape_campaigns = Table(
     "scrape_campaigns",
     metadata,
     Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")),
+    Column("client", Text, nullable=False, server_default=text("'sigil'")),
     Column("platform", platform_enum, nullable=False),
     Column("topic", Text, nullable=False),
     Column("country", Text),

@@ -159,6 +159,7 @@ async def upsert_campaigns(campaigns: list[Campaign]) -> int:
     values = [
         {
             "id": c.id,
+            "client": c.client,
             "platform": c.platform.value,
             "topic": c.topic,
             "country": c.country,
@@ -173,6 +174,7 @@ async def upsert_campaigns(campaigns: list[Campaign]) -> int:
         stmt = stmt.on_conflict_do_update(
             index_elements=[scrape_campaigns.c.id],
             set_={
+                "client": stmt.excluded.client,
                 "platform": stmt.excluded.platform,
                 "topic": stmt.excluded.topic,
                 "country": stmt.excluded.country,

@@ -41,6 +41,47 @@ progress_counter = {"processed": 0, "violations": 0, "errors": 0}
 
 EXCEL_ILLEGAL_CHAR_RE = re.compile(r"[\x00-\x08\x0b-\x0c\x0e-\x1f]")
 
+ANTI_OLEARY_SUBJECT_RE = re.compile(
+    r"\b(kevin\s*o['’]leary|o['’]leary|oleary|mr\.?\s*wonderful|stratos|o['’]leary\s*digital)\b",
+    re.IGNORECASE,
+)
+ANTI_DATACENTER_RE = re.compile(
+    r"\b(data\s*cent(?:er|re)|datacenter|hyperscale|server\s*farm|ai\s*hub|ai\s*data\s*cent(?:er|re))\b",
+    re.IGNORECASE,
+)
+ANTI_SIGNAL_RE = re.compile(
+    r"\b(stop|oppose|against|boycott|petition|protest|backlash|outrage|reject|block|ban|no\s+data\s*cent(?:er|re)|"
+    r"scam|grift|fraud|corrupt|dark\s*money|disinfo|misinfo|china|ccp|steal|water\s*grab|drain|pollute|destroy|ruin)\b",
+    re.IGNORECASE,
+)
+PRO_SIGNAL_RE = re.compile(
+    r"\b(support|back(s|ing)?|good\s+for\s+utah|jobs|investment|economic\s+growth|great\s+project|welcome|excited)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_anti_oleary_datacenter_post(post: dict[str, Any]) -> bool:
+    """Heuristic stance filter: keep posts that are plausibly *against* the project."""
+    text = " ".join(
+        str(v)
+        for v in [
+            post.get("content_text") or "",
+            post.get("url") or "",
+            " ".join(post.get("hashtags") or []),
+        ]
+        if v
+    )
+    if not ANTI_OLEARY_SUBJECT_RE.search(text):
+        return False
+    if not ANTI_DATACENTER_RE.search(text):
+        return False
+    if not ANTI_SIGNAL_RE.search(text):
+        return False
+    # If it's explicitly supportive, exclude it (even if it mentions backlash).
+    if PRO_SIGNAL_RE.search(text):
+        return False
+    return True
+
 
 def load_scraped_posts(
     platform_filters: list[str] | None = None,
@@ -207,6 +248,9 @@ def validate_post(post: dict[str, Any], policies_cache: dict[str, str], total: i
         result["passed_checks"] = ", ".join(verdict.passed_checks)
         result["report_message"] = verdict.generate_report_message()[:5000] if verdict.verdict != "PASS" else ""
         result["error"] = ""
+
+        # Always prefer the constructed URL used for validation (fills gaps).
+        result["url"] = post_data.url
         
         # Update progress
         with progress_lock:
@@ -272,19 +316,28 @@ def export_to_excel(results: list[dict[str, Any]], output_path: Path) -> None:
     if "verdict" in df.columns:
         df = df[df["verdict"] == "FLAGGED"].copy()
     
-    # Reorder columns for better UX
+    # Keep all current columns except the ones the user explicitly excluded:
+    # platform, verdict, confidence, violation_severities, passed_checks,
+    # checked_at, report_message, error, source_file
     column_order = [
-        # Core verdict
-        "platform", "verdict", "confidence",
         # Unified violation detail. Warning-level findings are included here.
-        "violations_count", "violation_rules", "violation_severities", 
-        "violation_explanations", "violation_quotes", "violation_policy_refs",
+        "violations_count",
+        "violation_rules",
+        "violation_explanations",
+        "violation_quotes",
+        "violation_policy_refs",
         # Post metadata
-        "post_id", "url", "author", "content_text",
-        "posted_at", "like_count", "comment_count", "view_count", "hashtags",
+        "post_id",
+        "url",
+        "author",
+        "content_text",
+        "posted_at",
+        "like_count",
+        "comment_count",
+        "view_count",
+        "hashtags",
         # Other
-        "passed_checks", "recommendation", "checked_at", "report_message",
-        "error", "source_file"
+        "recommendation",
     ]
     
     # Only include columns that exist
@@ -304,8 +357,14 @@ def export_to_excel(results: list[dict[str, Any]], output_path: Path) -> None:
     
     # Also export a summary CSV for quick viewing
     summary_path = output_path.with_suffix(".summary.csv")
-    summary_cols = ["platform", "verdict", "confidence", "violations_count",
-                    "violation_rules", "violation_policy_refs", "author", "content_text", "url"]
+    summary_cols = [
+        "violations_count",
+        "violation_rules",
+        "violation_policy_refs",
+        "author",
+        "content_text",
+        "url",
+    ]
     summary_cols = [c for c in summary_cols if c in df.columns]
     df[summary_cols].to_csv(summary_path, index=False)
     print(f"Exported summary to: {summary_path}")
@@ -324,6 +383,23 @@ def main() -> int:
     )
     parser.add_argument("--workers", type=int, default=5, help="Number of parallel workers (default: 5)")
     parser.add_argument("--skip-video", action="store_true", help="Skip video transcription (much faster)")
+    parser.add_argument(
+        "--anti-only",
+        action="store_true",
+        help="Only validate posts that are against Kevin O'Leary's Utah data center (heuristic stance filter).",
+    )
+    parser.add_argument(
+        "--anti-mode",
+        choices=["heuristic", "llm"],
+        default="llm",
+        help="How to detect anti-project stance when --anti-only is set (default: llm).",
+    )
+    parser.add_argument(
+        "--anti-strength",
+        choices=["exact", "strict"],
+        default="exact",
+        help="How strict the stance must be when using --anti-only with --anti-mode llm (default: exact).",
+    )
     
     args = parser.parse_args()
     
@@ -338,6 +414,69 @@ def main() -> int:
         print("No posts found to validate.")
         return 1
     
+    if args.anti_only:
+        if args.anti_mode == "heuristic":
+            before = len(posts)
+            posts = [p for p in posts if _is_anti_oleary_datacenter_post(p)]
+            print(f"Anti-only filter (heuristic): {len(posts)}/{before} kept")
+        else:
+            # LLM stance filter for higher recall.
+            from openai import OpenAI, OpenAIError
+
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                print("OPENAI_API_KEY missing; falling back to heuristic anti filter.")
+                before = len(posts)
+                posts = [p for p in posts if _is_anti_oleary_datacenter_post(p)]
+                print(f"Anti-only filter (heuristic): {len(posts)}/{before} kept")
+            else:
+                client = OpenAI(api_key=api_key)
+
+                def classify_against(post: dict[str, Any]) -> bool:
+                    text = (post.get("content_text") or "")[:4000]
+                    url = post.get("url") or ""
+                    if args.anti_strength == "strict":
+                        criteria = (
+                            "AGAINST must be explicit (calls to stop/block/oppose, supports protests/backlash, or allegations tied to the project)."
+                        )
+                    else:
+                        criteria = (
+                            "AGAINST can be subtle (negative framing/tone, skepticism, concerns about water/power/environment), "
+                            "but it must still be opposing/negative about the project."
+                        )
+                    prompt = (
+                        "Classify whether this post is AGAINST Kevin O'Leary building the Utah/Stratos AI data center project "
+                        f"(must be about Kevin/O'Leary and the Utah/Stratos data center; {criteria}).\n\n"
+                        "Return ONLY JSON: {\"against\": true|false}.\n\n"
+                        f"URL: {url}\n"
+                        f"TEXT: {text}\n"
+                    )
+                    try:
+                        resp = client.chat.completions.create(
+                            model=os.environ.get("OPENAI_MODEL", "gpt-4o"),
+                            max_tokens=50,
+                            response_format={"type": "json_object"},
+                            messages=[
+                                {"role": "system", "content": "You are a strict stance classifier. Output JSON only."},
+                                {"role": "user", "content": prompt},
+                            ],
+                        )
+                        raw = (resp.choices[0].message.content or "").strip()
+                        data = json.loads(raw)
+                        return bool(data.get("against"))
+                    except (OpenAIError, json.JSONDecodeError, Exception):
+                        return False
+
+                before = len(posts)
+                kept: list[dict[str, Any]] = []
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(12, args.workers * 2)) as ex:
+                    futs = [ex.submit(classify_against, p) for p in posts]
+                    for p, fut in zip(posts, futs):
+                        if fut.result():
+                            kept.append(p)
+                posts = kept
+                print(f"Anti-only filter (llm): {len(posts)}/{before} kept")
+
     if args.limit:
         posts = posts[:args.limit]
     

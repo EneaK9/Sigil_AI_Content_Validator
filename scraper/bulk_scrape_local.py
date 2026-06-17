@@ -89,6 +89,12 @@ async def run_single_campaign(
     
     run_input = adapter.build_input(campaign)
     run_input["resultsLimit"] = results_limit
+    # Some actors use platform-specific keys rather than `resultsLimit`.
+    if "max_results" in run_input:
+        # Some actors hard-cap this field (e.g. Facebook <= 1000).
+        run_input["max_results"] = min(results_limit, 1000)
+    if "maxResults" in run_input:
+        run_input["maxResults"] = results_limit
     
     print(f"\n{'='*60}")
     print(f"Starting {campaign.platform.value.upper()} scrape")
@@ -170,7 +176,11 @@ async def run_single_campaign(
             "kept_count": len(posts),
         }
         if relevance_filter:
-            posts, filter_stats = filter_and_dedupe_posts(posts)
+            posts, filter_stats = filter_and_dedupe_posts(
+                posts,
+                client=campaign.client,
+                topic=campaign.topic,
+            )
             print(
                 "Relevance/dedupe filter: "
                 f"{filter_stats['kept_count']} kept, "
@@ -221,6 +231,7 @@ async def run_single_campaign(
 
 
 async def run_bulk_scrape(
+    client_filter: str | None = None,
     platform_filter: str | None = None,
     results_limit: int = 2000,
     relevance_filter: bool = True,
@@ -242,6 +253,12 @@ async def run_bulk_scrape(
     
     enabled_campaigns = [c for c in campaigns if c.enabled]
     
+    if client_filter:
+        enabled_campaigns = [
+            c for c in enabled_campaigns
+            if str(c.client).lower() == str(client_filter).lower()
+        ]
+
     if platform_filter:
         enabled_campaigns = [
             c for c in enabled_campaigns 
@@ -256,6 +273,8 @@ async def run_bulk_scrape(
     print(f"# BULK SCRAPE (Local Storage)")
     print(f"# {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"# Campaigns: {len(enabled_campaigns)}")
+    if client_filter:
+        print(f"# Client filter: {client_filter}")
     print(f"# Results limit per campaign: {results_limit}")
     print(f"# Relevance filter: {'on' if relevance_filter else 'off'}")
     print(f"# Output directory: {RESULTS_DIR}")
@@ -305,6 +324,10 @@ def main() -> int:
         description="Run one-off bulk scrapes and save to local JSON files",
     )
     parser.add_argument(
+        "--client",
+        help="Filter by client (e.g. sigil, kevin). Runs all clients if omitted.",
+    )
+    parser.add_argument(
         "--platform",
         choices=["tiktok", "instagram", "facebook", "twitter", "linkedin", "reddit"],
         help="Filter by platform (run all if not specified)",
@@ -336,6 +359,7 @@ def main() -> int:
     
     try:
         results = asyncio.run(run_bulk_scrape(
+            client_filter=args.client,
             platform_filter=args.platform,
             results_limit=args.limit,
             relevance_filter=not args.no_relevance_filter,

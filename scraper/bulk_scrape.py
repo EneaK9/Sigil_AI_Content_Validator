@@ -163,6 +163,7 @@ async def run_single_campaign(
 
 
 async def run_bulk_scrape(
+    client_filter: str | None = None,
     platform_filter: str | None = None,
     results_limit: int = 2000,
 ) -> list[dict[str, Any]]:
@@ -183,6 +184,12 @@ async def run_bulk_scrape(
     
     enabled_campaigns = [c for c in campaigns if c.enabled]
     
+    if client_filter:
+        enabled_campaigns = [
+            c for c in enabled_campaigns
+            if str(c.client).lower() == str(client_filter).lower()
+        ]
+
     if platform_filter:
         enabled_campaigns = [
             c for c in enabled_campaigns 
@@ -239,6 +246,10 @@ def main() -> int:
         description="Run one-off bulk scrapes immediately",
     )
     parser.add_argument(
+        "--client",
+        help="Filter by client (e.g. sigil, kevin). Runs all clients if omitted.",
+    )
+    parser.add_argument(
         "--platform",
         choices=["tiktok", "instagram", "facebook", "twitter", "linkedin", "reddit"],
         help="Filter by platform (run all if not specified)",
@@ -254,6 +265,7 @@ def main() -> int:
     
     try:
         results = asyncio.run(run_bulk_scrape(
+            client_filter=args.client,
             platform_filter=args.platform,
             results_limit=args.limit,
         ))

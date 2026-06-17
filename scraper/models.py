@@ -65,6 +65,7 @@ class Campaign(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     id: UUID
+    client: str = "sigil"
     platform: Platform
     topic: str
     country: str | None = None

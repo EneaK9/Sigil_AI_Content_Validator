@@ -89,21 +89,37 @@ def get_settings() -> Settings:
     return Settings()
 
 
-def _campaign_id(platform: str, topic: str, country: str | None, seeds: list[str]) -> uuid.UUID:
-    """Deterministic UUID5 from a campaign's identity for stable re-loads."""
+def _campaign_id(
+    platform: str,
+    topic: str,
+    country: str | None,
+    seeds: list[str],
+    client: str | None,
+) -> uuid.UUID:
+    """Deterministic UUID5 from a campaign's identity for stable re-loads.
+
+    Note: to avoid breaking existing Sigil campaign ids that were generated
+    before the `client` field existed, we keep the UUID key unchanged for
+    the default Sigil client.
+    """
+    client_key = (client or "").strip().lower()
+    if client_key in {"", "sigil"}:
+        client_key = ""
     key = "|".join(
-        [platform, topic, country or "", ",".join(sorted(seeds))]
+        [client_key, platform, topic, country or "", ",".join(sorted(seeds))]
     )
     return uuid.uuid5(_CAMPAIGN_NAMESPACE, key)
 
 
 def _parse_campaign(entry: dict[str, Any]) -> Campaign:
+    client = str(entry.get("client") or "sigil")
     platform = str(entry["platform"]).lower()
     topic = str(entry["topic"])
     country = entry.get("country")
     seeds = [str(s) for s in entry.get("seeds", [])]
     return Campaign(
-        id=_campaign_id(platform, topic, country, seeds),
+        id=_campaign_id(platform, topic, country, seeds, client),
+        client=client,
         platform=Platform(platform),
         topic=topic,
         country=country,

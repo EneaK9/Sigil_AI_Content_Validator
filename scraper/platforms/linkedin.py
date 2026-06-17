@@ -67,10 +67,15 @@ class LinkedInScraper(PlatformScraper):
         if isinstance(author, str):
             author = {"name": author}
 
+        url = as_str(first(raw_item, "url", "postUrl", "shareUrl", "shareLink", "permalink"))
+        # Many LinkedIn scrapers return only an activity ID. Build a stable URL.
+        if not url and post_id.isdigit():
+            url = f"https://www.linkedin.com/feed/update/urn:li:activity:{post_id}/"
+
         return NormalizedPost(
             platform=Platform.linkedin,
             platform_post_id=post_id,
-            url=as_str(first(raw_item, "url", "postUrl", "shareUrl")),
+            url=url,
             author_handle=as_str(first(author, "name", "firstName", "username")),
             author_id=as_str(first(author, "id", "urn", "profileUrn")),
             author_url=as_str(first(author, "profileUrl", "url", "linkedInUrl")),

@@ -4,7 +4,8 @@
 
 campaigns:
   # TikTok campaign - compound story queries only
-  - platform: tiktok
+  - client: sigil
+    platform: tiktok
     topic: albania_political
     country: AL
     seeds:
@@ -20,7 +21,8 @@ campaigns:
     enabled: true
 
   # Instagram campaign - hashtags/profiles only; relevance filter removes broad hits
-  - platform: instagram
+  - client: sigil
+    platform: instagram
     topic: albania_political
     country: AL
     seeds:
@@ -38,7 +40,8 @@ campaigns:
     enabled: true
 
   # Facebook campaign - broad keyword query for F60Kx7YJNOmKmqQm3
-  - platform: facebook
+  - client: sigil
+    platform: facebook
     topic: albania_political
     country: AL
     seeds:
@@ -52,24 +55,28 @@ campaigns:
     daily_target: 1000
     enabled: true
 
-  # Twitter/X campaign - compound story queries only
-  - platform: twitter
+  # Twitter/X campaign - broader query terms (to avoid 0-result runs)
+  - client: sigil
+    platform: twitter
     topic: albania_political
     country: AL
     seeds:
-      - "Jared Kushner Albania protest"
-      - "Kushner Sazan Albania"
-      - "Trump Kushner Albania resort"
-      - "Ivanka Trump Albania resort"
-      - "Edi Rama Kushner Sazan"
-      - "Albania protest Kushner resort"
-      - "Sazan Island Kushner protest"
-      - "Kushner Shqiperi protesta"
+      - "albania"
+      - "edi rama"
+      - "kushner"
+      - "kushner albania"
+      - "sazan"
+      - "sazan kushner"
+      - "ivanka"
+      - "trump"
+      - "albania protest"
+      - "protesta shqiperi"
     daily_target: 1000
     enabled: true
 
   # LinkedIn campaign - compound story queries
-  - platform: linkedin
+  - client: sigil
+    platform: linkedin
     topic: albania_political
     country: AL
     seeds:
@@ -82,10 +89,175 @@ campaigns:
     enabled: true
 
   # Reddit campaign - r/albania plus search terms
-  - platform: reddit
+  - client: sigil
+    platform: reddit
     topic: albania_political
     country: AL
     seeds:
       - "rama, protests, kushner, trump, israel, albania"
+    daily_target: 100
+    enabled: true
+
+  # -----------------------------------------------------------------------
+  # Kevin O'Leary campaign - Utah AI data center backlash
+  # -----------------------------------------------------------------------
+  - client: kevin
+    platform: tiktok
+    topic: utah_datacenter_backlash
+    country: US
+    seeds:
+      - "Kevin O'Leary Utah data center"
+      - "Kevin O'Leary Stratos data center"
+      - "Stratos project Utah data center"
+      - "Box Elder County data center"
+      - "Great Salt Lake data center water"
+      - "Hansel Valley data center"
+      - "MIDA data center Utah"
+    daily_target: 100
+    enabled: true
+
+  # Kevin / TikTok - opposition-focused queries
+  - client: kevin
+    platform: tiktok
+    topic: utah_datacenter_backlash
+    country: US
+    seeds:
+      - "Stop Kevin O'Leary data center Utah"
+      - "Kevin O'Leary data center backlash"
+      - "Kevin O'Leary data center protest Utah"
+      - "Stratos data center backlash Utah"
+      - "Box Elder data center protest"
+      - "Great Salt Lake water data center"
+    daily_target: 100
+    enabled: true
+
+  - client: kevin
+    platform: facebook
+    topic: utah_datacenter_backlash
+    country: US
+    seeds:
+      - "Kevin O'Leary data center Utah"
+      - "Stratos data center Utah"
+      - "Box Elder County data center"
+      - "Hansel Valley data center"
+      - "Great Salt Lake data center"
+      - "MIDA data center"
+      - "Alliance for a Better Utah data center"
+    daily_target: 100
+    enabled: true
+
+  # Kevin / Facebook - opposition-focused keywords (actor is sensitive; keep simple terms)
+  - client: kevin
+    platform: facebook
+    topic: utah_datacenter_backlash
+    country: US
+    seeds:
+      - "Kevin O'Leary data center protest"
+    daily_target: 100
+    enabled: true
+
+  - client: kevin
+    platform: facebook
+    topic: utah_datacenter_backlash
+    country: US
+    seeds:
+      - "Kevin O'Leary data center backlash"
+    daily_target: 100
+    enabled: true
+
+  - client: kevin
+    platform: facebook
+    topic: utah_datacenter_backlash
+    country: US
+    seeds:
+      - "Stratos data center protest"
+    daily_target: 100
+    enabled: true
+
+  - client: kevin
+    platform: facebook
+    topic: utah_datacenter_backlash
+    country: US
+    seeds:
+      - "Box Elder data center protest"
+    daily_target: 100
+    enabled: true
+
+  - client: kevin
+    platform: facebook
+    topic: utah_datacenter_backlash
+    country: US
+    seeds:
+      - "Great Salt Lake data center water"
+    daily_target: 100
+    enabled: true
+
+  - client: kevin
+    platform: facebook
+    topic: utah_datacenter_backlash
+    country: US
+    seeds:
+      - "Hansel Valley data center oppose"
+    daily_target: 100
+    enabled: true
+
+  - client: kevin
+    platform: twitter
+    topic: utah_datacenter_backlash
+    country: US
+    seeds:
+      - "\"Kevin O'Leary\" Utah data center"
+      - "\"Kevin O'Leary\" Stratos data center"
+      - "\"Stratos\" Box Elder data center"
+      - "\"Hansel Valley\" data center"
+      - "\"Great Salt Lake\" data center"
+      - "\"MIDA\" data center"
+      - "\"Alliance for a Better Utah\" O'Leary"
+    daily_target: 100
+    enabled: true
+
+  # Kevin / X-Twitter - opposition-focused queries (higher recall for "against" posts)
+  - client: kevin
+    platform: twitter
+    topic: utah_datacenter_backlash
+    country: US
+    seeds:
+      - "\"Kevin O'Leary\" data center Utah stop"
+      - "\"Kevin O'Leary\" data center Utah oppose"
+      - "\"Kevin O'Leary\" data center Utah protest"
+      - "\"Stratos\" data center Utah backlash"
+      - "\"Box Elder\" data center backlash"
+      - "\"Hansel Valley\" data center oppose"
+      - "\"Great Salt Lake\" data center water"
+      - "\"O'Leary\" data center China"
+    daily_target: 100
+    enabled: true
+
+  - client: kevin
+    platform: linkedin
+    topic: utah_datacenter_backlash
+    country: US
+    seeds:
+      - "Kevin O'Leary Utah data center"
+      - "Stratos Hyperscale Data Center"
+      - "Stratos Utah data center"
+      - "Box Elder County data center"
+      - "Great Salt Lake water data center"
+      - "MIDA Utah data center"
+    daily_target: 100
+    enabled: true
+
+  # Kevin / LinkedIn - opposition-focused queries
+  - client: kevin
+    platform: linkedin
+    topic: utah_datacenter_backlash
+    country: US
+    seeds:
+      - "Kevin O'Leary data center backlash"
+      - "Kevin O'Leary data center protest"
+      - "Stratos data center backlash"
+      - "Box Elder data center backlash"
+      - "Great Salt Lake water data center protest"
+      - "MIDA data center opposition"
     daily_target: 100
     enabled: true
